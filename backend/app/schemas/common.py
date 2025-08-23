@@ -110,3 +110,58 @@ class ErrorResponse(BaseSchema):
     error_code: str = Field(..., description="Machine-readable error code")
     details: Optional[Dict[str, Any]] = Field(None, description="Additional error details")
     timestamp: datetime = Field(..., description="When the error occurred (ISO 8601)")
+
+class SourceRef(BaseSchema):
+    """
+    Normalized evidence item for citations/Sources panel.
+    Derived or direct from Pinecone.
+    """
+    id: str = Field(..., description="Chunk id (e.g., 'faq_012')")
+    category: Optional[str] = Field(None, description="Category tag (e.g., 'Payments & Transactions')")
+    score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Raw or normalized similarity score")
+    title: Optional[str] = Field(None, description="Derived short title (e.g., first question sentence)")
+    preview: Optional[str] = Field(None, description="Short preview for UI (first 8–12 words)")
+    content_hash: Optional[str] = Field(None, description="Hash of the content for drift/audit")
+    rank: Optional[int] = Field(None, ge=1, description="Rank position among hits (1..k)")
+    score_norm: Optional[float] = Field(None, ge=0.0, le=1.0, description="Score normalized within this result set")
+    confidence_bucket: Optional[Literal["high", "medium", "low"]] = Field(
+        None, description="UX-friendly confidence bucket"
+    )
+    # Optional passthroughs
+    index_name: Optional[str] = None
+    namespace: Optional[str] = None
+    model_name: Optional[str] = None
+
+
+class PromptContextPolicy(BaseSchema):
+    """
+    How we packed/trimmed context for the LLM prompt (for reproducibility).
+    """
+    max_chars: Optional[int] = Field(None, description="Max characters allowed into prompt")
+    dedupe: Optional[Literal["none", "by_root"]] = Field("by_root", description="Dedupe strategy")
+    order: Optional[Literal["score_then_category", "score_only"]] = Field(
+        "score_then_category", description="Ordering strategy when packing"
+    )
+
+
+class RetrievalParams(BaseSchema):
+    """
+    Knobs used for retrieval this turn. Stored per-message.
+    """
+    top_k: Optional[int] = Field(None, ge=1)
+    min_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    namespace: Optional[str] = Field(None, description="e.g., '__default__'")
+    index_name: Optional[str] = None
+    embed_model: Optional[str] = Field(None, description="e.g., 'llama-text-embed-v2'")
+
+
+class RetrievalStats(BaseSchema):
+    """
+    What actually happened during retrieval.
+    """
+    best_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    kept_hits: Optional[int] = Field(None, ge=0)
+    n_hits: Optional[int] = Field(None, ge=0)
+    retrieval_ms: Optional[float] = Field(None, ge=0.0)
+    tokens_in: Optional[int] = Field(None, ge=0)
+    tokens_out: Optional[int] = Field(None, ge=0)

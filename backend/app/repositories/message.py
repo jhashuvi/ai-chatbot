@@ -6,353 +6,298 @@ Handles message storage, retrieval, and RAG context management.
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, func
+from datetime import datetime
 import logging
 
 from .base import BaseRepository
 from ..models.message import Message
+from ..models.chat_session import ChatSession
 from ..schemas.message import MessageCreate, MessageUpdate
 
 logger = logging.getLogger(__name__)
+
 
 class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
     """
     Repository for message management operations.
     Extends BaseRepository with message-specific functionality.
     """
-    
+
     def __init__(self):
         super().__init__(Message)
-    
+
+    # ---------- Helpers (internal) ----------
+
+    def _touch_session_on_new_message(self, db: Session, session_id: int, is_assistant: bool) -> None:
+        """Increment counters and bump recency on the parent session."""
+        session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+        if not session:
+            return
+        session.message_count = (session.message_count or 0) + 1
+        if is_assistant:
+            session.assistant_message_count = (session.assistant_message_count or 0) + 1
+        session.last_message_at = datetime.utcnow()
+        # Keep is_active unless explicitly archived elsewhere
+        db.add(session)
+
+    # ---------- Queries ----------
+
     def get_by_session_id(
-        self, 
-        db: Session, 
-        chat_session_id: int, 
-        skip: int = 0, 
+        self,
+        db: Session,
+        chat_session_id: int,
+        skip: int = 0,
         limit: int = 100,
-        role: Optional[str] = None
+        role: Optional[str] = None,
+        ascending: bool = True,
     ) -> List[Message]:
-        """
-        Get messages for a specific chat session with pagination.
-        
-        Args:
-            db: Database session
-            chat_session_id: Chat session ID
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            role: Filter by role ('user' or 'assistant')
-            
-        Returns:
-            List of messages
-        """
+        """Get messages for a session with pagination; default chronological order."""
         try:
-            query = db.query(Message).filter(Message.chat_session_id == chat_session_id)
-            
+            q = db.query(Message).filter(Message.chat_session_id == chat_session_id)
             if role:
-                query = query.filter(Message.role == role)
-            
-            return query.order_by(Message.created_at).offset(skip).limit(limit).all()
+                q = q.filter(Message.role == role)
+            q = q.order_by(Message.created_at if ascending else desc(Message.created_at))
+            return q.offset(skip).limit(limit).all()
         except Exception as e:
-            logger.error(f"Error getting messages for session {chat_session_id}: {e}")
+            logger.error(f"get_by_session_id failed (session={chat_session_id}): {e}")
             raise
-    
+
     def get_conversation_history(
-        self, 
-        db: Session, 
-        chat_session_id: int, 
+        self,
+        db: Session,
+        chat_session_id: int,
         limit: int = 10
     ) -> List[Message]:
         """
-        Get recent conversation history for context.
-        
-        Args:
-            db: Database session
-            chat_session_id: Chat session ID
-            limit: Maximum number of recent messages
-            
-        Returns:
-            List of recent messages
+        Get the most recent 'limit' messages, returned oldest→newest for prompt assembly.
         """
         try:
-            return db.query(Message).filter(
-                Message.chat_session_id == chat_session_id
-            ).order_by(desc(Message.created_at)).limit(limit).all()
+            recent = (
+                db.query(Message)
+                .filter(Message.chat_session_id == chat_session_id)
+                .order_by(desc(Message.created_at))
+                .limit(limit)
+                .all()
+            )
+            return list(reversed(recent))
         except Exception as e:
-            logger.error(f"Error getting conversation history for session {chat_session_id}: {e}")
+            logger.error(f"get_conversation_history failed (session={chat_session_id}): {e}")
             raise
-    
+
+    # ---------- Mutations ----------
+
     def create_user_message(
-        self, 
-        db: Session, 
-        chat_session_id: int, 
+        self,
+        db: Session,
+        chat_session_id: int,
         content: str
     ) -> Message:
-        """
-        Create a new user message.
-        
-        Args:
-            db: Database session
-            chat_session_id: Chat session ID
-            content: Message content
-            
-        Returns:
-            Created message
-        """
+        """Create a user message and bump session recency/counters."""
         try:
-            message_data = MessageCreate(
+            msg = self.create(db, MessageCreate(
                 content=content,
                 chat_session_id=chat_session_id,
                 role="user"
-            )
-            return self.create(db, message_data)
+            ))
+            self._touch_session_on_new_message(db, chat_session_id, is_assistant=False)
+            db.flush()
+            return msg
         except Exception as e:
-            logger.error(f"Error creating user message for session {chat_session_id}: {e}")
+            logger.error(f"create_user_message failed (session={chat_session_id}): {e}")
+            db.rollback()
             raise
-    
+
     def create_assistant_message(
-        self, 
-        db: Session, 
-        chat_session_id: int, 
+        self,
+        db: Session,
+        chat_session_id: int,
         content: str,
-        context_chunks: Optional[List[Dict[str, Any]]] = None,
-        citations: Optional[List[Dict[str, Any]]] = None,
-        model_used: Optional[str] = None,
-        tokens_used: Optional[int] = None,
+        *,
+        # RAG artifacts (normalized)
+        sources: Optional[List[Dict[str, Any]]] = None,              # [{id, category, score, title?, preview, content_hash, rank, score_norm?, confidence_bucket?}]
+        retrieval_params: Optional[Dict[str, Any]] = None,           # {"top_k":5,"min_score":0.2,"namespace":"__default__","embed_model":"llama-text-embed-v2",...}
+        retrieval_stats: Optional[Dict[str, Any]] = None,            # {"best_score":0.349,"kept_hits":3,"n_hits":5,"retrieval_ms":42,"tokens_in":812,"tokens_out":216}
+        context_policy: Optional[Dict[str, Any]] = None,             # {"max_chars":6000,"dedupe":"by_root","order":"score_then_category"}
+        answer_type: Optional[str] = None,                           # "grounded" | "abstained" | "fallback"
+        error_type: Optional[str] = None,
+
+        # Model usage
+        model_provider: Optional[str] = None,                        # e.g., "openai"
+        model_used: Optional[str] = None,                            # e.g., "gpt-4.1-mini"
+        tokens_in: Optional[int] = None,
+        tokens_out: Optional[int] = None,
         latency_ms: Optional[float] = None,
-        retrieval_score: Optional[float] = None
+
+        # Back-compat / optional
+        citations: Optional[List[Dict[str, Any]]] = None,
+        retrieval_score: Optional[float] = None,
+        flagged: Optional[bool] = None,
     ) -> Message:
         """
-        Create a new assistant message with RAG context.
-        
-        Args:
-            db: Database session
-            chat_session_id: Chat session ID
-            content: Message content
-            context_chunks: RAG context chunks used
-            citations: Source citations
-            model_used: AI model used for generation
-            tokens_used: Number of tokens used
-            latency_ms: Response time in milliseconds
-            retrieval_score: Quality score of retrieved context
-            
-        Returns:
-            Created message
+        Create an assistant message with evidence and metrics in one call.
         """
         try:
-            message_data = MessageCreate(
+            msg = self.create(db, MessageCreate(
                 content=content,
                 chat_session_id=chat_session_id,
                 role="assistant"
-            )
-            
-            message = self.create(db, message_data)
-            
-            # Update RAG context and metrics
-            update_data = MessageUpdate(
-                context_chunks=context_chunks,
-                citations=citations,
-                model_used=model_used,
-                tokens_used=tokens_used,
-                latency_ms=latency_ms,
-                retrieval_score=retrieval_score
-            )
-            
-            return self.update(db, message, update_data)
+            ))
+
+            # Build minimal update payload; only set fields that are provided
+            update_payload: Dict[str, Any] = {}
+            if sources is not None:           update_payload["sources"] = sources
+            if retrieval_params is not None:  update_payload["retrieval_params"] = retrieval_params
+            if retrieval_stats is not None:   update_payload["retrieval_stats"] = retrieval_stats
+            if context_policy is not None:    update_payload["context_policy"] = context_policy
+            if answer_type is not None:       update_payload["answer_type"] = answer_type
+            if error_type is not None:        update_payload["error_type"] = error_type
+
+            if citations is not None:         update_payload["citations"] = citations
+            if model_used is not None:        update_payload["model_used"] = model_used
+            if model_provider is not None:    update_payload["model_provider"] = model_provider
+
+            # Prefer separate in/out, keep tokens_used for back-compat/analytics
+            if tokens_in is not None:         update_payload["tokens_in"] = tokens_in
+            if tokens_out is not None:        update_payload["tokens_out"] = tokens_out
+            if tokens_in is not None or tokens_out is not None:
+                total = (tokens_in or 0) + (tokens_out or 0)
+                update_payload["tokens_used"] = total
+
+            if latency_ms is not None:        update_payload["latency_ms"] = latency_ms
+            if retrieval_score is not None:   update_payload["retrieval_score"] = retrieval_score
+            if flagged is not None:           update_payload["flagged"] = flagged
+
+            msg = self.update(db, msg, MessageUpdate(**update_payload))
+
+            # bump session counters/recency
+            self._touch_session_on_new_message(db, chat_session_id, is_assistant=True)
+            db.flush()
+            return msg
         except Exception as e:
-            logger.error(f"Error creating assistant message for session {chat_session_id}: {e}")
+            logger.error(f"create_assistant_message failed (session={chat_session_id}): {e}")
+            db.rollback()
             raise
-    
+
     def update_user_feedback(
-        self, 
-        db: Session, 
-        message_id: int, 
+        self,
+        db: Session,
+        message_id: int,
         feedback: int
     ) -> Message:
-        """
-        Update user feedback for a message.
-        
-        Args:
-            db: Database session
-            message_id: Message ID
-            feedback: User feedback (1, -1, or 0)
-            
-        Returns:
-            Updated message
-        """
+        """Update thumbs (1 / -1 / 0) on an assistant message."""
         try:
-            message = self.get(db, message_id)
-            if not message:
+            msg = self.get(db, message_id)
+            if not msg:
                 raise ValueError(f"Message {message_id} not found")
-            
-            if not message.is_assistant_message:
+            if not msg.is_assistant_message:
                 raise ValueError("Can only provide feedback on assistant messages")
-            
-            update_data = MessageUpdate(user_feedback=feedback)
-            return self.update(db, message, update_data)
+
+            updated = self.update(db, msg, MessageUpdate(user_feedback=feedback))
+            return updated
         except Exception as e:
-            logger.error(f"Error updating feedback for message {message_id}: {e}")
+            logger.error(f"update_user_feedback failed (message_id={message_id}): {e}")
+            db.rollback()
             raise
-    
-    def get_messages_by_user(
-        self, 
-        db: Session, 
-        user_id: int, 
-        skip: int = 0, 
-        limit: int = 100
-    ) -> List[Message]:
-        """
-        Get all messages for a user across all sessions.
-        
-        Args:
-            db: Database session
-            user_id: User ID
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of messages
-        """
-        try:
-            return db.query(Message).join(
-                Message.chat_session
-            ).filter(
-                Message.chat_session.has(user_id=user_id)
-            ).order_by(desc(Message.created_at)).offset(skip).limit(limit).all()
-        except Exception as e:
-            logger.error(f"Error getting messages for user {user_id}: {e}")
-            raise
-    
+
+    # ---------- Analytics ----------
+
     def get_message_analytics(
-        self, 
-        db: Session, 
+        self,
+        db: Session,
         chat_session_id: Optional[int] = None,
         user_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        Get analytics for messages.
-        
-        Args:
-            db: Database session
-            chat_session_id: Optional session ID for session-specific analytics
-            user_id: Optional user ID for user-specific analytics
-            
-        Returns:
-            Dictionary with analytics data
-        """
+        """Basic analytics with latency and token summaries on assistant messages."""
         try:
-            query = db.query(Message)
-            
+            base_q = db.query(Message)
             if chat_session_id:
-                query = query.filter(Message.chat_session_id == chat_session_id)
+                base_q = base_q.filter(Message.chat_session_id == chat_session_id)
             elif user_id:
-                query = query.join(Message.chat_session).filter(
+                base_q = base_q.join(Message.chat_session).filter(
                     Message.chat_session.has(user_id=user_id)
                 )
-            
-            total_messages = query.count()
-            user_messages = query.filter(Message.role == "user").count()
-            assistant_messages = query.filter(Message.role == "assistant").count()
-            
-            # Average response time for assistant messages
-            avg_latency = query.filter(
-                and_(
-                    Message.role == "assistant",
-                    Message.latency_ms.isnot(None)
-                )
-            ).with_entities(func.avg(Message.latency_ms)).scalar() or 0
-            
-            # Total tokens used
-            total_tokens = query.filter(
-                and_(
-                    Message.role == "assistant",
-                    Message.tokens_used.isnot(None)
-                )
-            ).with_entities(func.sum(Message.tokens_used)).scalar() or 0
-            
-            # Feedback statistics
-            positive_feedback = query.filter(
-                and_(
-                    Message.role == "assistant",
-                    Message.user_feedback == 1
-                )
-            ).count()
-            
-            negative_feedback = query.filter(
-                and_(
-                    Message.role == "assistant",
-                    Message.user_feedback == -1
-                )
-            ).count()
-            
+
+            total_messages = base_q.count()
+            user_messages = base_q.filter(Message.role == "user").count()
+            assistant_messages = base_q.filter(Message.role == "assistant").count()
+
+            # Assistant-only aggregates
+            asst_q = base_q.filter(Message.role == "assistant")
+
+            avg_latency = asst_q.with_entities(func.avg(Message.latency_ms)).scalar() or 0
+            total_tokens_in = asst_q.with_entities(func.sum(Message.tokens_in)).scalar() or 0
+            total_tokens_out = asst_q.with_entities(func.sum(Message.tokens_out)).scalar() or 0
+
+            # Feedback stats
+            positive = asst_q.filter(Message.user_feedback == 1).count()
+            negative = asst_q.filter(Message.user_feedback == -1).count()
+
+            # Retrieval quality (best_score mirrored to retrieval_score for quick scans)
+            avg_retrieval_score = asst_q.with_entities(func.avg(Message.retrieval_score)).scalar() or 0
+
             return {
                 "total_messages": total_messages,
                 "user_messages": user_messages,
                 "assistant_messages": assistant_messages,
-                "average_latency_ms": avg_latency,
-                "total_tokens_used": total_tokens,
-                "positive_feedback": positive_feedback,
-                "negative_feedback": negative_feedback,
-                "feedback_ratio": positive_feedback / (positive_feedback + negative_feedback) if (positive_feedback + negative_feedback) > 0 else 0
+                "average_latency_ms": float(avg_latency),
+                "total_tokens_in": int(total_tokens_in),
+                "total_tokens_out": int(total_tokens_out),
+                "positive_feedback": positive,
+                "negative_feedback": negative,
+                "feedback_ratio": (positive / (positive + negative)) if (positive + negative) > 0 else 0.0,
+                "avg_retrieval_score": float(avg_retrieval_score),
             }
         except Exception as e:
-            logger.error(f"Error getting message analytics: {e}")
+            logger.error(f"get_message_analytics failed: {e}")
             raise
-    
+
+    # ---------- Search ----------
+
     def search_messages(
-        self, 
-        db: Session, 
-        user_id: int, 
+        self,
+        db: Session,
+        user_id: int,
         search_term: str,
         skip: int = 0,
         limit: int = 100
     ) -> List[Message]:
-        """
-        Search messages by content.
-        
-        Args:
-            db: Database session
-            user_id: User ID
-            search_term: Search term
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of matching messages
-        """
+        """Simple LIKE search over message content for a given user."""
         try:
-            search_pattern = f"%{search_term}%"
-            return db.query(Message).join(
-                Message.chat_session
-            ).filter(
-                and_(
-                    Message.chat_session.has(user_id=user_id),
-                    Message.content.ilike(search_pattern)
+            pattern = f"%{search_term}%"
+            return (
+                db.query(Message)
+                .join(Message.chat_session)
+                .filter(
+                    and_(
+                        Message.chat_session.has(user_id=user_id),
+                        Message.content.ilike(pattern),
+                    )
                 )
-            ).order_by(desc(Message.created_at)).offset(skip).limit(limit).all()
+                .order_by(desc(Message.created_at))
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
         except Exception as e:
-            logger.error(f"Error searching messages for user {user_id}: {e}")
+            logger.error(f"search_messages failed (user_id={user_id}): {e}")
             raise
-    
+
     def get_flagged_messages(
-        self, 
-        db: Session, 
-        skip: int = 0, 
+        self,
+        db: Session,
+        skip: int = 0,
         limit: int = 100
     ) -> List[Message]:
-        """
-        Get messages that have been flagged for review.
-        
-        Args:
-            db: Database session
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of flagged messages
-        """
+        """List messages flagged for review."""
         try:
-            return db.query(Message).filter(
-                Message.flagged == True
-            ).order_by(desc(Message.created_at)).offset(skip).limit(limit).all()
+            return (
+                db.query(Message)
+                .filter(Message.flagged.is_(True))
+                .order_by(desc(Message.created_at))
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
         except Exception as e:
-            logger.error(f"Error getting flagged messages: {e}")
+            logger.error(f"get_flagged_messages failed: {e}")
             raise
