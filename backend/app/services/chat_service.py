@@ -49,6 +49,43 @@ class ChatService:
     def _reply_nonsense() -> str:
         return "I didn’t quite catch that. Could you ask a question about our financial services?"
 
+    def _canned_reply_for_intent(self, intent: str, user_text: str) -> str:
+        if intent == "greeting":
+            return self._reply_greeting()
+        if intent == "smalltalk":
+            return self._reply_smalltalk()
+        if intent == "off_topic":
+            return self._reply_off_topic()
+        # default
+        return self._reply_nonsense()
+
+    def _send_canned(
+        self,
+        db: Session,
+        chat_session_id: int,
+        intent: str,
+        confidence: float,
+        content: str,
+    ):
+        """
+        Persist ONLY an assistant message for non-RAG paths.
+        (Skip create_user_message to match your test policy.)
+        """
+        asst = self.msg_repo.create_assistant_message(
+            db, chat_session_id, content,
+            sources=[],
+            retrieval_params=None,
+            retrieval_stats={"router_intent": intent, "intent_confidence": confidence},
+            context_policy=None,
+            answer_type="fallback",   # non-RAG path
+            model_provider=None,
+            model_used=None,
+            tokens_in=None, tokens_out=None,
+            latency_ms=0.0,
+            retrieval_score=None,
+        )
+        return {"answer": content, "message_id": asst.id, "answer_type": "fallback"}
+
     # --- public API ---
 
     def handle_user_message(
@@ -63,7 +100,7 @@ class ChatService:
         """
         Main entry: classify → route
         - For RAG path, let RAGService persist the user message (to avoid double-writes).
-        - For non-RAG paths, persist both user + assistant here.
+        - For non-RAG paths, persist ONLY an assistant message here.
         """
         # small recent history for context bias
         history_msgs = self.msg_repo.get_conversation_history(db, chat_session_id, limit=history_size)
@@ -71,77 +108,16 @@ class ChatService:
 
         result: IntentResult = self.intent.classify(user_text, history_for_intent)
 
+        # RAG-worthy: let RAG handle persistence & generation
         if result.intent == "fintech_question":
-            # Let RAG handle persistence and generation, but pass processed query
             return self.rag.answer(db, chat_session_id, result.processed_query, stream=stream)
 
-        # Non-RAG routes: persist user first
-        user_msg = self.msg_repo.create_user_message(db, chat_session_id, user_text)
-
-        if result.intent == "greeting":
-            content = self._reply_greeting()
-            asst = self.msg_repo.create_assistant_message(
-                db, chat_session_id, content,
-                sources=[],
-                retrieval_params=None,
-                retrieval_stats={"router_intent": "greeting", "intent_confidence": result.confidence},
-                context_policy=None,
-                answer_type="non_rag",
-                model_provider=None,
-                model_used=None,
-                tokens_in=None, tokens_out=None,
-                latency_ms=0.0,
-                retrieval_score=None
-            )
-            return {"answer": content, "message_id": asst.id, "answer_type": "non_rag"}
-
-        if result.intent == "smalltalk":
-            content = self._reply_smalltalk()
-            asst = self.msg_repo.create_assistant_message(
-                db, chat_session_id, content,
-                sources=[],
-                retrieval_params=None,
-                retrieval_stats={"router_intent": "smalltalk", "intent_confidence": result.confidence},
-                context_policy=None,
-                answer_type="non_rag",
-                model_provider=None,
-                model_used=None,
-                tokens_in=None, tokens_out=None,
-                latency_ms=0.0,
-                retrieval_score=None
-            )
-            return {"answer": content, "message_id": asst.id, "answer_type": "non_rag"}
-
-        if result.intent == "off_topic":
-            content = self._reply_off_topic()
-            asst = self.msg_repo.create_assistant_message(
-                db, chat_session_id, content,
-                sources=[],
-                retrieval_params=None,
-                retrieval_stats={"router_intent": "off_topic", "intent_confidence": result.confidence},
-                context_policy=None,
-                answer_type="non_rag",
-                model_provider=None,
-                model_used=None,
-                tokens_in=None, tokens_out=None,
-                latency_ms=0.0,
-                retrieval_score=None
-            )
-            return {"answer": content, "message_id": asst.id, "answer_type": "non_rag"}
-
-        # default: nonsense
-        content = self._reply_nonsense()
-        asst = self.msg_repo.create_assistant_message(
-            db, chat_session_id, content,
-            sources=[],
-            retrieval_params=None,
-            retrieval_stats={"router_intent": "nonsense", "intent_confidence": result.confidence},
-            context_policy=None,
-            answer_type="non_rag",
-            model_provider=None,
-            model_used=None,
-            tokens_in=None, tokens_out=None,
-            latency_ms=0.0,
-            retrieval_score=None
+        # Non-RAG: do NOT persist user message; send a single assistant reply
+        content = self._canned_reply_for_intent(result.intent, user_text)
+        return self._send_canned(
+            db=db,
+            chat_session_id=chat_session_id,
+            intent=(result.intent or "unknown"),
+            confidence=(result.confidence or 0.0),
+            content=content,
         )
-        return {"answer": content, "message_id": asst.id, "answer_type": "non_rag"}

@@ -3,7 +3,7 @@ Base repository class with common CRUD operations.
 Provides a consistent interface for all data access operations.
 """
 
-from typing import TypeVar, Generic, Type, Optional, List, Any, Dict
+from typing import TypeVar, Generic, Type, Optional, List, Any, Dict, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from pydantic import BaseModel
@@ -91,70 +91,103 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
             logger.error(f"Error getting multiple {self.model.__name__}: {e}")
             raise
     
-    def create(self, db: Session, obj_in: CreateSchemaType) -> T:
-        """
-        Create a new record.
-        
-        Args:
-            db: Database session
-            obj_in: Pydantic schema with creation data
-            
-        Returns:
-            Created model instance
-        """
+    # def create(self, db: Session, obj_in: CreateSchemaType) -> T:
+    #     """
+    #     Create a new record.
+    #     
+    #     Args:
+    #         db: Database session
+    #         obj_in: Pydantic schema with creation data
+    #         
+    #     Returns:
+    #         Created model instance
+    #     """
+    #     try:
+    #         # Convert Pydantic schema to dict, excluding unset fields
+    #         obj_data = obj_in.model_dump(exclude_unset=True)
+    #         db_obj = self.model(**obj_data)
+    #         
+    #         db.add(db_obj)
+    #         db.flush()  # Flush to get the ID
+    #         db.refresh(db_obj)
+    #         
+    #         logger.info(f"Created {self.model.__name__} with id {db_obj.id}")
+    #         return db_obj
+    #     except Exception as e:
+    #         logger.error(f"Error creating {self.model.__name__}: {e}")
+    #         db.rollback()
+    #         raise
+    
+    def create(self, db: Session, obj_in: Union[CreateSchemaType, dict]) -> T:
         try:
-            # Convert Pydantic schema to dict, excluding unset fields
-            obj_data = obj_in.model_dump(exclude_unset=True)
+            obj_data = self._to_dict(obj_in)
+            obj_data = self._filter_model_fields(obj_data)
             db_obj = self.model(**obj_data)
-            
             db.add(db_obj)
-            db.flush()  # Flush to get the ID
+            db.flush()
             db.refresh(db_obj)
-            
             logger.info(f"Created {self.model.__name__} with id {db_obj.id}")
             return db_obj
         except Exception as e:
             logger.error(f"Error creating {self.model.__name__}: {e}")
             db.rollback()
             raise
+
+
+    # def update(
+    #     self, 
+    #     db: Session, 
+    #     db_obj: T, 
+    #     obj_in: UpdateSchemaType
+    # ) -> T:
+    #     """
+    #     Update an existing record.
+    #     
+    #     Args:
+    #         db: Database session
+    #         db_obj: Existing model instance
+    #         obj_in: Pydantic schema with update data
+    #         
+    #     Returns:
+    #         Updated model instance
+    #     """
+    #     try:
+    #         # Convert Pydantic schema to dict, excluding unset fields
+    #         update_data = obj_in.model_dump(exclude_unset=True)
+    #         
+    #         # Update only provided fields
+    #         for field, value in update_data.items():
+    #             if hasattr(db_obj, field):
+    #                 setattr(db_obj, field, value)
+    #         
+    #         db.add(db_obj)
+    #         db.flush()
+    #         db.refresh(db_obj)
+    #         
+    #         logger.info(f"Updated {self.model.__name__} with id {db_obj.id}")
+    #         return db_obj
+    #     except Exception as e:
+    #         logger.error(f"Error updating {self.model.__name__} with id {db_obj.id}: {e}")
+    #         db.rollback()
+    #         raise
     
-    def update(
-        self, 
-        db: Session, 
-        db_obj: T, 
-        obj_in: UpdateSchemaType
-    ) -> T:
-        """
-        Update an existing record.
-        
-        Args:
-            db: Database session
-            db_obj: Existing model instance
-            obj_in: Pydantic schema with update data
-            
-        Returns:
-            Updated model instance
-        """
+    def update(self, db: Session, db_obj: T, obj_in: Union[UpdateSchemaType, dict]) -> T:
         try:
-            # Convert Pydantic schema to dict, excluding unset fields
-            update_data = obj_in.model_dump(exclude_unset=True)
-            
-            # Update only provided fields
+            update_data = self._to_dict(obj_in)
+            update_data = self._filter_model_fields(update_data)
             for field, value in update_data.items():
                 if hasattr(db_obj, field):
                     setattr(db_obj, field, value)
-            
             db.add(db_obj)
             db.flush()
             db.refresh(db_obj)
-            
             logger.info(f"Updated {self.model.__name__} with id {db_obj.id}")
             return db_obj
         except Exception as e:
             logger.error(f"Error updating {self.model.__name__} with id {db_obj.id}: {e}")
             db.rollback()
             raise
-    
+
     def delete(self, db: Session, id: int) -> bool:
         """
         Delete a record by ID.
@@ -224,3 +257,19 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
         except Exception as e:
             logger.error(f"Error checking existence of {self.model.__name__} with id {id}: {e}")
             raise
+    
+    def _filter_model_fields(self, data: dict) -> dict:
+        cols = {c.key for c in self.model.__table__.columns}
+        return {k: v for k, v in data.items() if k in cols}
+
+    def _to_dict(self, obj: Any) -> dict:
+        # Pydantic v2
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump(exclude_unset=True)
+        # Pydantic v1
+        if hasattr(obj, "dict"):
+            return obj.dict(exclude_unset=True)
+        # Already a dict
+        if isinstance(obj, dict):
+            return obj
+        raise TypeError(f"Unsupported input type for {self.model.__name__}: {type(obj)}")

@@ -159,12 +159,13 @@ class ChatSessionRepository(BaseRepository[ChatSession, SessionCreate, SessionUp
         Create a new chat session. last_message_at starts at now().
         """
         try:
-            session_data = SessionCreate(
-                user_id=user_id,
-                title=title,
-                description=description,
-                is_active=True,
-            )
+            session_data = {
+                "user_id": user_id,
+                "title": title,               # keep
+                #"description": description,   # ← REMOVE THIS
+                "summary_text": None,         # optional: or a brief string
+                "is_active": True,
+            }
             session = self.create(db, session_data)
             # Ensure recency fields initialized
             session.last_message_at = datetime.utcnow()
