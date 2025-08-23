@@ -179,3 +179,5 @@ class PineconeClient:
             })
 
         return chunks, (best if best > 0 else None)
+
+PineconeIntegratedClient = PineconeClient

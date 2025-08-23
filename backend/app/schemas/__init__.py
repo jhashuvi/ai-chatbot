@@ -1,46 +1,20 @@
-# Schemas package for API request/response validation
-
-# Base schemas
+# app/schemas/__init__.py
 from .base import BaseSchema, TimestampSchema, IDSchema, BaseResponseSchema
-
-# Common data structures
-from .common import Citation, ContextChunk, ChatMetrics, ErrorResponse
-
-# User schemas
-from .user import (
-    UserCreate, UserLogin, UserUpdate, UserResponse, 
-    UserSession, AuthResponse
+from .common import (
+    EmbeddingInfo,
+    Citation,
+    ContextChunk,
+    ChatMetrics,
+    ErrorResponse,
 )
+from .user import UserBase, UserCreate, UserUpdate, UserLogin, UserResponse
+from .message import MessageCreate, MessageUpdate, MessageResponse
+from .session import SessionCreate, SessionUpdate, SessionResponse
 
-# Session schemas
-from .session import (
-    SessionCreate, SessionUpdate, SessionResponse, 
-    SessionListResponse, SessionSummary
-)
-
-# Message schemas
-from .message import (
-    MessageCreate, MessageUpdate, MessageResponse,
-    ChatRequest, ChatResponse, MessageListResponse, MessageFeedback
-)
-
-# Export all schemas for easy importing
 __all__ = [
-    # Base
     "BaseSchema", "TimestampSchema", "IDSchema", "BaseResponseSchema",
-    
-    # Common
-    "Citation", "ContextChunk", "ChatMetrics", "ErrorResponse",
-    
-    # User
-    "UserCreate", "UserLogin", "UserUpdate", "UserResponse", 
-    "UserSession", "AuthResponse",
-    
-    # Session
-    "SessionCreate", "SessionUpdate", "SessionResponse", 
-    "SessionListResponse", "SessionSummary",
-    
-    # Message
+    "EmbeddingInfo", "Citation", "ContextChunk", "ChatMetrics", "ErrorResponse",
+    "UserBase", "UserCreate", "UserUpdate", "UserLogin", "UserResponse",
     "MessageCreate", "MessageUpdate", "MessageResponse",
-    "ChatRequest", "ChatResponse", "MessageListResponse", "MessageFeedback"
+    "SessionCreate", "SessionUpdate", "SessionResponse",
 ]

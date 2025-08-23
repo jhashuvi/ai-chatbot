@@ -1,36 +1,35 @@
-"""
-Pydantic schemas for User entity.
-Aligned with models.user.User and repositories.user.UserRepository.
-"""
-
-from typing import Optional
+# app/schemas/user.py
+from __future__ import annotations
 from datetime import datetime
-from pydantic import Field, EmailStr
+from typing import Optional
+from pydantic import EmailStr, Field
 
 from .base import BaseSchema, BaseResponseSchema
 
 
+class UserBase(BaseSchema):
+    session_id: str = Field(..., description="Anonymous or authenticated session identifier")
+    email: Optional[EmailStr] = Field(None, description="Email for authenticated users")
+    is_authenticated: bool = Field(False, description="Whether the user is authenticated")
+
+
 class UserCreate(BaseSchema):
-    session_id: str = Field(..., description="Anonymous or authenticated session key")
-    # Optional immediate-auth fields
-    email: Optional[EmailStr] = None
-    password_hash: Optional[str] = Field(
-        None, description="Hashed password; service layer should hash plain text first"
-    )
-    is_authenticated: Optional[bool] = False
+    session_id: str = Field(..., description="Browser/session identifier for the user")
 
 
 class UserUpdate(BaseSchema):
+    # Use password_hash here to match the DB and repository layer
     email: Optional[EmailStr] = None
-    password_hash: Optional[str] = Field(
-        None, description="Set only with a properly hashed password"
-    )
+    password_hash: Optional[str] = None
     is_authenticated: Optional[bool] = None
     last_login_at: Optional[datetime] = None
 
 
-class UserResponse(BaseResponseSchema):
-    session_id: str
-    email: Optional[EmailStr] = None
-    is_authenticated: bool
+class UserLogin(BaseSchema):
+    # Handy if/when you add an auth endpoint
+    email: EmailStr
+    password: str
+
+
+class UserResponse(UserBase, BaseResponseSchema):
     last_login_at: Optional[datetime] = None
