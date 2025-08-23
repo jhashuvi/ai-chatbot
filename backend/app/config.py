@@ -7,6 +7,7 @@ import os
 class Settings:
     DATABASE_URL = os.getenv("DATABASE_URL", "")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
     PINECONE_INDEX = os.getenv("PINECONE_INDEX", "")
     PINECONE_HOST = os.getenv("PINECONE_HOST", "")
