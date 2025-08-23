@@ -5,7 +5,7 @@ Includes RAG context, citations, and user feedback.
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from .base import BaseResponseSchema
 from .common import Citation, ContextChunk, ChatMetrics
 
@@ -19,9 +19,9 @@ class MessageCreate(BaseModel):
     chat_session_id: int = Field(..., description="ID of the chat session this message belongs to")
     role: str = Field(default="user", description="Message role (user or assistant)")
     
-    @validator('role')
+    @field_validator('role')
+    @classmethod
     def validate_role(cls, v):
-        """Validate that role is either 'user' or 'assistant'."""
         if v not in ['user', 'assistant']:
             raise ValueError('Role must be either "user" or "assistant"')
         return v
@@ -34,6 +34,13 @@ class MessageUpdate(BaseModel):
     
     user_feedback: Optional[int] = Field(None, ge=-1, le=1, description="User feedback: 1 (thumbs up), -1 (thumbs down), 0 (neutral)")
     flagged: Optional[bool] = Field(None, description="Whether the message should be flagged for review")
+
+    context_chunks: Optional[List[Dict[str, Any]]] = None
+    citations: Optional[List[Dict[str, Any]]] = None
+    model_used: Optional[str] = None
+    tokens_used: Optional[int] = Field(None, ge=0)
+    latency_ms: Optional[float] = Field(None, ge=0.0)
+    retrieval_score: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 class MessageResponse(BaseResponseSchema):
     """
@@ -70,10 +77,9 @@ class ChatRequest(BaseModel):
     user_id: Optional[int] = Field(None, description="User ID (for authenticated users)")
     chat_session_id: Optional[int] = Field(None, description="Existing chat session ID (for continuing conversations)")
     
-    @validator('message')
+    @field_validator('message')
+    @classmethod
     def validate_message_content(cls, v):
-        """Basic content validation and sanitization."""
-        # Remove excessive whitespace
         v = ' '.join(v.split())
         if not v.strip():
             raise ValueError('Message cannot be empty after sanitization')
