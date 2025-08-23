@@ -13,19 +13,19 @@ Base = declarative_base()
 class BaseModel(Base):
     """
     Abstract base model that provides common fields for all entities.
-    
+
     Attributes:
         id: Primary key for the entity
         created_at: Timestamp when the record was created
         updated_at: Timestamp when the record was last updated
     """
-    
-    # This makes this class abstract - it won't create a table
     __abstract__ = True
-    
-    # Primary key - auto-incrementing integer
+
     id = Column(Integer, primary_key=True, index=True)
-    
-    # Audit timestamps - automatically managed
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def __repr__(self) -> str:
+        # Generic, helpful repr for debugging in dev
+        cls = self.__class__.__name__
+        return f"<{cls}(id={getattr(self, 'id', None)})>"
