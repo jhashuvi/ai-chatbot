@@ -107,6 +107,7 @@ class ChatService:
         history_for_intent = [{"role": m.role, "content": m.content} for m in history_msgs]
 
         result: IntentResult = self.intent.classify(user_text, history_for_intent)
+        print("intent_debug:", result.intent, result.confidence, result.signals.get("matched_keywords"))
 
         # RAG-worthy: let RAG handle persistence & generation
         if result.intent == "fintech_question":

@@ -133,7 +133,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserUpdate]):
         try:
             update_data = UserUpdate(
                 email=email,
-                password=password_hash  # This will be hashed by the service layer
+                password_hash=password_hash  # This will be hashed by the service layer
             )
             return self.update(db, user, update_data)
         except Exception as e:

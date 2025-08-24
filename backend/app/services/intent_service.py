@@ -28,8 +28,8 @@ class IntentService:
     - Small synonym rewriting and a light history nudge.
     """
 
-    GREET = {"hi", "hello", "hey", "yo", "good morning", "good afternoon", "good evening"}
-    SMALLTALK = {"thanks", "thank you", "lol", "haha", "jaja", "cool", "nice", "ok", "okay", "got it"}
+    GREET = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}
+    SMALLTALK = {"thanks", "thank you", "lol", "haha", "cool", "nice", "ok", "okay", "got it"}
     OFFTOPIC_HINTS = {
         "weather", "joke", "cat", "dog", "movie", "song", "sports",
         "news", "recipe", "cooking", "music", "stock price"
@@ -124,7 +124,7 @@ class IntentService:
         cat_hits: Dict[str, List[str]] = {cat: [] for cat in self.LEXICON}
         for cat, words in self.LEXICON.items():
             for w in words:
-                if w in low:
+                if re.search(rf"\b{re.escape(w)}\b", low):
                     cat_hits[cat].append(w)
 
         cat_scores = {cat: len(hits) for cat, hits in cat_hits.items()}
@@ -236,7 +236,7 @@ Category:"""
 
     @staticmethod
     def _contains_any(text: str, bag: set) -> bool:
-        return any(p in text for p in bag)
+        return any(re.search(rf"\b{re.escape(w)}\b", text) for w in bag)
 
     @staticmethod
     def _category_score(text: str, bag: set) -> int:
