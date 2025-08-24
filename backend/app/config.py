@@ -1,8 +1,11 @@
-"""
-This file contains the configuration for the application (located in backend).
-"""
-
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Always point to the repo root .env
+BASE_DIR = Path(__file__).resolve().parents[2]  # /Users/shuvijha/ai-chatbot/ai-chatbot
+env_path = BASE_DIR / ".env"
+load_dotenv(dotenv_path=env_path)
 
 class Settings:
     DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -11,6 +14,10 @@ class Settings:
     PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
     PINECONE_INDEX = os.getenv("PINECONE_INDEX", "")
     PINECONE_HOST = os.getenv("PINECONE_HOST", "")
-    JWT_SECRET = os.getenv("JWT_SECRET", "change_me")
+
+    # JWT config
+    JWT_SECRET = os.getenv("JWT_SECRET", "")
+    JWT_ALG = os.getenv("JWT_ALG", "HS256")
+    JWT_EXPIRE_MIN = int(os.getenv("JWT_EXPIRE_MIN", 60))
 
 settings = Settings()
