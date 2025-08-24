@@ -50,9 +50,18 @@ export interface ChatSession {
 }
 
 export interface SourceRef {
+  id: string;
   title: string;
-  content: string;
-  confidence: number;
+  preview: string;
+  content_hash?: string;
+  category?: string;
+  score?: number; // Raw Pinecone score
+  score_norm?: number; // Normalized confidence (0.0 to 1.0)
+  confidence_bucket?: string; // "high", "medium", "low"
+  rank: number;
+  index_name?: string;
+  namespace?: string;
+  model_name?: string;
   metadata?: Record<string, any>;
 }
 
