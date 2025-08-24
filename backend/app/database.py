@@ -86,26 +86,29 @@ def get_db_context() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-def create_tables():
-    """
-    Create all database tables.
-    Used for database initialization and migrations.
-    """
-    try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created successfully")
-    except Exception as e:
-        logger.error(f"Error creating database tables: {e}")
-        raise
 
-def drop_tables():
-    """
-    Drop all database tables.
-    Used for testing and database reset.
-    """
-    try:
-        Base.metadata.drop_all(bind=engine)
-        logger.info("Database tables dropped successfully")
-    except Exception as e:
-        logger.error(f"Error dropping database tables: {e}")
-        raise
+# def create_tables():
+#     """
+#     Create all database tables.
+#     Used for database initialization and migrations.
+#     """
+#     try:
+#         Base.metadata.create_all(bind=engine)
+#         logger.info("Database tables created successfully")
+#     except Exception as e:
+#         logger.error(f"Error creating database tables: {e}")
+#         raise
+# 
+# No longer relevant given we are using alembic migrations
+
+# def drop_tables():
+#     """
+#     Drop all database tables.
+#     Used for testing and database reset.
+#     """
+#     try:
+#         Base.metadata.drop_all(bind=engine)
+#         logger.info("Database tables dropped successfully")
+#     except Exception as e:
+#         logger.error(f"Error dropping database tables: {e}")
+#         raise
