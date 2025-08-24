@@ -2,15 +2,10 @@
 "use client";
 
 import React from "react";
-import {
-  Plus,
-  MessageSquare,
-  Settings,
-  User,
-  LogOut,
-  Menu,
-} from "lucide-react";
+import { Plus, MessageSquare, User, LogOut, Menu } from "lucide-react";
 import type { ChatSession } from "@/types/api";
+import { useAuth } from "@/lib/auth";
+import AuthModal from "./AuthModal";
 
 interface SidebarProps {
   sessions: ChatSession[];
@@ -29,6 +24,9 @@ export default function Sidebar({
   isOpen,
   onToggle,
 }: SidebarProps) {
+  const { isAuthenticated, email, logout } = useAuth(); // hooks must be inside component
+  const [authOpen, setAuthOpen] = React.useState(false); // modal state
+
   const titleFor = (s: ChatSession) =>
     s.title?.trim() ? s.title.trim() : "New chat";
 
@@ -55,6 +53,7 @@ export default function Sidebar({
             <button
               onClick={onToggle}
               className="lg:hidden p-1 rounded-md hover:bg-gray-800 transition-colors"
+              aria-label="Toggle sidebar"
             >
               <Menu className="h-5 w-5" />
             </button>
@@ -108,22 +107,32 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer: account/auth */}
         <div className="border-t border-gray-700 p-4 space-y-2">
-          <button className="w-full flex items-center space-x-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-lg transition-colors text-sm">
+          <button
+            className="w-full flex items-center space-x-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-lg transition-colors text-sm"
+            onClick={() => setAuthOpen(true)}
+          >
             <User className="h-4 w-4" />
-            <span>Account</span>
+            <span>
+              {isAuthenticated ? email || "Account" : "Sign in / Register"}
+            </span>
           </button>
-          <button className="w-full flex items-center space-x-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-lg transition-colors text-sm">
-            <Settings className="h-4 w-4" />
-            <span>Settings</span>
-          </button>
-          <button className="w-full flex items-center space-x-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-lg transition-colors text-sm">
-            <LogOut className="h-4 w-4" />
-            <span>Sign out</span>
-          </button>
+
+          {isAuthenticated && (
+            <button
+              className="w-full flex items-center space-x-3 px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white rounded-lg transition-colors text-sm"
+              onClick={logout}
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Sign out</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Auth modal */}
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </>
   );
 }

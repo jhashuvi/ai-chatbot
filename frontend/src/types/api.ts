@@ -104,6 +104,25 @@ export interface AuthResponse {
   session_id?: string; // returned on /auth/register
 }
 
+export interface RegisterResponse {
+  user_id: number;
+  access_token: string;
+  token_type: string; // "bearer"
+  session_id: string; // ALWAYS returned by /auth/register
+}
+
+export interface LoginResponse {
+  user_id: number;
+  access_token: string;
+  token_type: string; // "bearer"
+}
+
+export interface MeResponse {
+  user_id: number;
+  email?: string;
+  is_authenticated: boolean;
+}
+
 // Sessions list wrapper and summary (used by /sessions and /sessions/summary)
 export interface ListSessionsResponse {
   items: ChatSession[];

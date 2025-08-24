@@ -20,6 +20,23 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
+export const authApi = {
+  me: async () => {
+    const res = await api.get("/auth/me");
+    return res.data as {
+      user_id: number;
+      email?: string;
+      is_authenticated: boolean;
+    };
+  },
+  logout: () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("auth_token");
+      // keep session_id so anonymous history persists
+    }
+  },
+};
+
 // Attach Authorization and X-Session-Id headers
 api.interceptors.request.use((config) => {
   const token =
