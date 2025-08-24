@@ -145,7 +145,14 @@ class ChatService:
 
         # RAG-worthy: let RAG handle persistence & generation
         if result.intent == "fintech_question":
-            return self.rag.answer(db, chat_session_id, result.processed_query, stream=stream)
+                return self.rag.answer(
+                    db,
+                    chat_session_id,
+                    result.processed_query,
+                    stream=stream,
+                    category_hint=result.signals.get("category_hint"),
+                    intent_confidence=result.confidence,
+                )
 
         # Non-RAG: do NOT persist user message; send a single assistant reply
         content = self._canned_reply_for_intent(result.intent, user_text)

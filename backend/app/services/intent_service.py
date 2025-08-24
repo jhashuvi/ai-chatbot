@@ -32,14 +32,23 @@ class IntentService:
     SMALLTALK = {"thanks", "thank you", "lol", "haha", "cool", "nice", "ok", "okay", "got it"}
     OFFTOPIC_HINTS = {
         "weather", "joke", "cat", "dog", "movie", "song", "sports",
-        "news", "recipe", "cooking", "music", "stock price"
+        "news", "recipe", "cooking", "music", "stock price", "btc price", "bitcoin"
     }
 
-    # Tiny fintech keyword lexicon (category → words)
+    # Tiny fintech keyword lexicon (category → words/phrases)
     LEXICON = {
-        "account": {"account", "signup", "register", "verify", "identity", "kyc", "profile", "open"},
-        "payments": {"transfer", "send", "receive", "deposit", "withdraw", "card", "fee", "limit", "payment"},
-        "security": {"fraud", "phish", "compromise", "password", "2fa", "otp", "lock", "suspend", "secure"},
+        "account": {
+            "account", "signup", "register", "verify", "identity", "kyc", "profile", "open",
+            "password", "passcode", "credentials"
+        },
+        "payments": {
+            "transfer", "send", "receive", "deposit", "withdraw", "card", "fee", "limit", "payment", "transaction",
+            "cancel", "reversal", "refund", "chargeback", "dispute", "failed", "declined"
+        },
+        "security": {
+            "fraud", "phish", "compromise", "password", "2fa", "otp", "lock", "suspend", "secure",
+            "data", "privacy", "encryption", "encrypted", "protect", "protection"
+        },
         "regulatory": {"kyc", "aml", "compliance", "insure", "insurance", "fdic", "limit", "hold", "regulation"},
         "support": {"bug", "crash", "not working", "support", "contact", "help", "email", "issue", "problem"},
     }
@@ -57,6 +66,14 @@ class IntentService:
         r"\bblocked card\b": "card locked",
         r"\bfrozen account\b": "account suspended",
         r"\bcan['’]?t login\b": "login issues",
+        r"\bcharges?\b": "fee",
+        r"\bcosts?\b": "fee",
+        r"\bprivacy\b": "security",
+        r"\bdata protection\b": "security",
+        r"\bfreeze (my )?account\b": "lock account",
+        r"\bcancel(ed|ling)? (a )?payment\b": "payment reversal",
+        r"\bchange password\b": "password change",
+        r"\breset password\b": "password reset",
     }
 
     def __init__(
@@ -120,11 +137,11 @@ class IntentService:
         if any(hint in low for hint in self.OFFTOPIC_HINTS):
             return IntentResult("off_topic", normalized, 0.85, {**signals, "match": "off_topic_hint"})
 
-        # fintech keyword scoring
+        # fintech keyword scoring (plural/inflection aware)
         cat_hits: Dict[str, List[str]] = {cat: [] for cat in self.LEXICON}
         for cat, words in self.LEXICON.items():
             for w in words:
-                if re.search(rf"\b{re.escape(w)}\b", low):
+                if self._word_hit(w, low):
                     cat_hits[cat].append(w)
 
         cat_scores = {cat: len(hits) for cat, hits in cat_hits.items()}
@@ -139,11 +156,11 @@ class IntentService:
         rewritten = self._bias_with_history(rewritten, history, category_hint)
         rewritten = self._normalize(rewritten)
 
-        # confidence policy
+        # confidence policy (favor RAG when question has any fintech hit)
         if best_score >= 2:
             return IntentResult("fintech_question", rewritten, 0.9, signals)
         if best_score >= 1 and signals["is_question"]:
-            return IntentResult("fintech_question", rewritten, 0.75, signals)
+            return IntentResult("fintech_question", rewritten, 0.7, signals)
         if best_score >= 1:
             return IntentResult("fintech_question", rewritten, 0.6, signals)
         if signals["is_question"]:
@@ -236,7 +253,28 @@ Category:"""
 
     @staticmethod
     def _contains_any(text: str, bag: set) -> bool:
-        return any(re.search(rf"\b{re.escape(w)}\b", text) for w in bag)
+        """
+        Keyword match with light pluralization/inflection:
+        - fee/fees, limit/limits, transaction/transactions, charge/charges, etc.
+        """
+        for w in bag:
+            # allow simple plural/suffix variants (s, es, ed, ing)
+            pat = rf"\b{re.escape(w)}(?:s|es|ed|ing)?\b"
+            if re.search(pat, text):
+                return True
+        return False
+
+    @staticmethod
+    def _word_hit(word: str, text_low: str) -> bool:
+        """
+        Match single words with simple inflections; keep phrases as-is.
+        """
+        if " " in word.strip():
+            # phrase — match as a whole (case-insensitive)
+            return re.search(rf"\b{re.escape(word)}\b", text_low) is not None
+        # single token — allow simple suffixes
+        pat = rf"\b{re.escape(word)}(?:s|es|ed|ing)?\b"
+        return re.search(pat, text_low) is not None
 
     @staticmethod
     def _category_score(text: str, bag: set) -> int:
