@@ -48,11 +48,13 @@ class LLMClient:
                 max_tokens=max_tokens,
                 messages=msgs,
             )
+            
             txt = (resp.choices[0].message.content or "").strip()
             usage = getattr(resp, "usage", None)
             latency_ms = (time.time() - started) * 1000.0
             tokens_in = getattr(usage, "prompt_tokens", None)
             tokens_out = getattr(usage, "completion_tokens", None)
+
             return {
                 "text": txt,
                 "model": self.model,

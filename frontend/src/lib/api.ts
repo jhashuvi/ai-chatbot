@@ -1,15 +1,26 @@
-// src/lib/api.ts - Fixed to match your backend
+// src/lib/api.ts
 import axios from "axios";
+
+// Re-export the canonical types from src/types/api so callers can import from either place.
+export type {
+  ChatSession,
+  HistoryItem,
+  HistoryResponse,
+  Message,
+  SourceRef,
+  ChatResponse,
+  AuthResponse,
+  ListSessionsResponse,
+  SessionsSummary,
+} from "@/types/api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-// Create axios instance with default config
 const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
 });
 
-// Add auth token and session ID to requests
+// Attach Authorization and X-Session-Id headers
 api.interceptors.request.use((config) => {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
@@ -20,172 +31,86 @@ api.interceptors.request.use((config) => {
   const sessionId =
     typeof window !== "undefined" ? localStorage.getItem("session_id") : null;
   if (sessionId) {
+    // exact header name as backend expects (convert_underscores=False)
     config.headers["X-Session-Id"] = sessionId;
   }
-
   return config;
 });
 
-// ========== TYPES (Updated to match your backend) ==========
-
-export interface User {
-  id: number; // Your backend uses int, not string
-  email?: string;
-  is_authenticated?: boolean;
-}
-
-export interface ChatSession {
-  id: number; // Your backend uses int
-  created_at: string;
-  updated_at: string;
-  user_id: number;
-  title?: string;
-  description?: string;
-  is_active: boolean;
-  summary_text?: string;
-  message_count: number;
-  assistant_message_count: number;
-  last_message_at?: string;
-  ended_at?: string;
-}
-
-export interface SourceRef {
-  id: string;
-  title: string;
-  preview: string;
-  content_hash?: string;
-  category?: string;
-  score?: number; // Raw Pinecone score
-  score_norm?: number; // Normalized confidence (0.0 to 1.0)
-  confidence_bucket?: string; // "high", "medium", "low"
-  rank: number;
-  index_name?: string;
-  namespace?: string;
-  model_name?: string;
-  metadata?: Record<string, any>;
-}
-
-export interface ChatMetrics {
-  // Add fields based on your ChatMetrics schema
-  [key: string]: any;
-}
-
-export interface Message {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-  created_at: string;
-}
-
-export interface ChatResponse {
-  answer: string; // Your backend returns "answer", not "response"
-  answer_type: "grounded" | "abstained" | "fallback";
-  message_id?: number;
-  session_id?: number;
-  sources: SourceRef[];
-  metrics?: ChatMetrics;
-}
-
-export interface AuthResponse {
-  user_id: number;
-  access_token: string;
-  token_type: string;
-  session_id?: string; // For register endpoint
-}
-
-export interface HistoryResponse {
-  session_id: number;
-  messages: Message[];
-}
-
-// ========== API FUNCTIONS ==========
+// ---------- API FUNCTIONS ----------
 
 export const chatApi = {
-  // Health check (fixed endpoint)
+  // Health
   healthCheck: async () => {
-    const response = await api.get("/healthz");
-    return response.data;
+    const { data } = await api.get("/healthz");
+    return data;
   },
 
-  // Chat - requires session_id as integer
-  sendMessage: async (
-    message: string,
-    sessionId: number
-  ): Promise<ChatResponse> => {
-    const requestBody = {
-      session_id: sessionId, // Required integer
-      message: message,
+  // Chat
+  sendMessage: async (message: string, sessionId: number) => {
+    const body = {
+      session_id: sessionId,
+      message,
+      // backend has defaults; these are fine but optional:
       stream: false,
       history_size: 6,
     };
-
-    console.log("Sending chat request:", requestBody);
-    const response = await api.post("/chat", requestBody);
-    console.log("Chat response:", response.data);
-    return response.data;
+    const { data } = await api.post("/chat", body);
+    return data as import("@/types/api").ChatResponse;
   },
 
   // Sessions
-  createSession: async (title?: string): Promise<ChatSession> => {
-    // Generate a session ID for X-Session-Id header if not exists
-    if (!localStorage.getItem("session_id")) {
-      localStorage.setItem(
-        "session_id",
-        `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      );
-    }
-
-    const response = await api.post("/sessions", { title });
-    return response.data;
+  createSession: async () => {
+    ensureSessionId();
+    const { data } = await api.post("/sessions", {}); // no title
+    return data as import("@/types/api").ChatSession;
   },
 
-  listSessions: async (): Promise<ChatSession[]> => {
-    // Generate a session ID for X-Session-Id header if not exists
-    if (!localStorage.getItem("session_id")) {
-      localStorage.setItem(
-        "session_id",
-        `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      );
-    }
+  listSessions: async () => {
+    ensureSessionId();
+    const { data } = await api.get("/sessions");
+    // backend returns { items: ChatSession[], next_cursor: null }
+    return (data.items ?? []) as import("@/types/api").ChatSession[];
+  },
 
-    const response = await api.get("/sessions");
-    return response.data.items; // Your backend returns {items: [...]}
+  getSessionsSummary: async () => {
+    ensureSessionId();
+    const { data } = await api.get("/sessions/summary");
+    return data as import("@/types/api").SessionsSummary;
   },
 
   // Chat history
-  getChatHistory: async (sessionId: number): Promise<Message[]> => {
-    const response = await api.get("/chat/history", {
-      params: { session_id: sessionId },
+  getChatHistory: async (sessionId: number) => {
+    const { data } = await api.get("/chat/history", {
+      params: { session_id: sessionId, limit: 100 },
     });
-    return response.data.messages;
+    return data.messages as import("@/types/api").HistoryItem[];
   },
 
   // Auth
-  register: async (email: string, password: string): Promise<AuthResponse> => {
-    const response = await api.post("/auth/register", { email, password });
-    return response.data;
+  register: async (email: string, password: string) => {
+    ensureSessionId(); // upgrade anonymous → authenticated in place
+    const { data } = await api.post("/auth/register", { email, password });
+    return data as import("@/types/api").AuthResponse;
   },
 
-  login: async (email: string, password: string): Promise<AuthResponse> => {
-    const response = await api.post("/auth/login", { email, password });
-    return response.data;
+  login: async (email: string, password: string) => {
+    const { data } = await api.post("/auth/login", { email, password });
+    return data as import("@/types/api").AuthResponse;
   },
 
-  // Feedback
-  submitFeedback: async (
-    messageId: number,
-    value: 1 | -1 | 0
-  ): Promise<void> => {
+  // Feedback (204 No Content)
+  submitFeedback: async (messageId: number, value: -1 | 0 | 1) => {
     await api.post(`/messages/${messageId}/feedback`, { value });
   },
 };
 
-// Helper to ensure session ID exists
+// Ensure a browser session id exists (used for X-Session-Id)
 export const ensureSessionId = () => {
   if (typeof window !== "undefined" && !localStorage.getItem("session_id")) {
     localStorage.setItem(
       "session_id",
-      `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
     );
   }
 };

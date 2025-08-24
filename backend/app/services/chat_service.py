@@ -31,6 +31,36 @@ class ChatService:
         self.msg_repo = msg_repo or MessageRepository()
         self.sess_repo = sess_repo or ChatSessionRepository()
 
+    # ---------------- NEW: auto-title helper ----------------
+    def _autotitle_if_empty(self, db: Session, chat_session_id: int, user_text: str) -> None:
+        """
+        Set a human title from the first user message if the session has no title yet.
+        Safe to call every turn: set_title_if_empty only writes when empty.
+        """
+        try:
+            raw = (user_text or "").strip()
+            if not raw:
+                candidate = "New chat"
+            else:
+                # collapse whitespace
+                candidate = " ".join(raw.split())
+                # trim to ~60 chars on a word boundary (but don't cut too short)
+                if len(candidate) > 60:
+                    head = candidate[:60]
+                    cut_at = head.rfind(" ")
+                    if cut_at >= 30:
+                        candidate = head[:cut_at]
+                    else:
+                        candidate = head
+                # light sentence casing
+                candidate = candidate[0].upper() + candidate[1:] if candidate else "New chat"
+
+            self.sess_repo.set_title_if_empty(db, chat_session_id, candidate)
+        except Exception:
+            # Never let title generation break chat flow
+            pass
+    # --------------------------------------------------------
+
     # --- canned responses (keep short & friendly) ---
 
     @staticmethod
@@ -102,6 +132,10 @@ class ChatService:
         - For RAG path, let RAGService persist the user message (to avoid double-writes).
         - For non-RAG paths, persist ONLY an assistant message here.
         """
+        # ------- NEW: try to auto-title this session (first user turn wins) -------
+        self._autotitle_if_empty(db, chat_session_id, user_text)
+        # ----------------------------------------------------------------------------
+
         # small recent history for context bias
         history_msgs = self.msg_repo.get_conversation_history(db, chat_session_id, limit=history_size)
         history_for_intent = [{"role": m.role, "content": m.content} for m in history_msgs]
