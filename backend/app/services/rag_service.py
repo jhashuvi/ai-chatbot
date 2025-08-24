@@ -1,6 +1,6 @@
 # app/services/rag_service.py
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from hashlib import sha256
 import time
 
@@ -40,7 +40,7 @@ def _split_qa(text: str):
         return text[: qpos + 1].strip(), text[qpos + 1 :].strip()
     return "", text.strip()
 
-def _normalize_sources(hits: List[Dict[str, any]]) -> List[SourceRef]:
+def _normalize_sources(hits: List[Dict[str, Any]]) -> List[SourceRef]:
     out: List[SourceRef] = []
     if not hits:
         return out
@@ -84,7 +84,7 @@ def _normalize_sources(hits: List[Dict[str, any]]) -> List[SourceRef]:
         ))
     return out
 
-def _pack_context_for_prompt(sources: List[SourceRef], hits: List[Dict[str, any]], max_chars: int = 6000) -> str:
+def _pack_context_for_prompt(sources: List[SourceRef], hits: List[Dict[str, Any]], max_chars: int = 6000) -> str:
     by_id = {}
     for h in hits:
         cid = (h.get("id") or h.get("chunk_id") or "")
@@ -209,40 +209,42 @@ class RAGService:
         )
 
         # 6) LLM
-        result = self.llm.chat(self.SYSTEM_PROMPT, user_prompt, stream=stream)
-
-        if stream:
-            buffer = []
-
-            def _gen():
-                for chunk in result:
-                    buffer.append(chunk)
-                    yield chunk
-                text = "".join(buffer)
-                asst = self.msg_repo.create_assistant_message(
-                    db, chat_session_id, text,
-                    sources=[s.model_dump(exclude_none=True) for s in sources],
-                    retrieval_params=RetrievalParams(
-                        top_k=self.top_k, min_score=self.min_score,
-                        namespace="__default__", index_name=settings.PINECONE_INDEX,
-                        embed_model="llama-text-embed-v2"
-                    ).model_dump(exclude_none=True),
-                    retrieval_stats=RetrievalStats(
-                        best_score=best, kept_hits=len(sources), n_hits=len(hits),
-                        retrieval_ms=retrieval_ms
-                    ).model_dump(exclude_none=True),
-                    context_policy=PromptContextPolicy(
-                        max_chars=self.max_context_chars, dedupe="by_root", order="score_then_category"
-                    ).model_dump(exclude_none=True),
-                    answer_type="grounded",
-                    model_provider="openai",
-                    model_used=self.llm.model,
-                    retrieval_score=best,
-                )
-                return {"answer": text, "message_id": asst.id, "answer_type": "grounded",
-                        "sources": [s.model_dump(exclude_none=True) for s in sources]}
-
-            return _gen()
+        try:
+            result = self.llm.chat(self.SYSTEM_PROMPT, user_prompt, stream=stream)
+        except Exception as e:
+            # graceful fallback: persist an abstain with error tag
+            content = (
+                "I couldn’t reach the model just now. Please try again later, "
+                "or ask about account setup, payments, security, or regulations."
+            )
+            asst = self.msg_repo.create_assistant_message(
+                db, chat_session_id, content,
+                sources=[s.model_dump(exclude_none=True) for s in sources],
+                retrieval_params=RetrievalParams(
+                    top_k=self.top_k, min_score=self.min_score,
+                    namespace="__default__", index_name=settings.PINECONE_INDEX,
+                    embed_model="llama-text-embed-v2"
+                ).model_dump(exclude_none=True),
+                retrieval_stats=RetrievalStats(
+                    best_score=best, kept_hits=len(sources), n_hits=len(hits),
+                    retrieval_ms=retrieval_ms
+                ).model_dump(exclude_none=True),
+                context_policy=PromptContextPolicy(
+                    max_chars=self.max_context_chars, dedupe="by_root", order="score_then_category"
+                ).model_dump(exclude_none=True),
+                answer_type="abstained",
+                error_type="llm_error",
+                model_provider="openai",
+                model_used=getattr(self.llm, "model", None),
+                tokens_in=0, tokens_out=0, latency_ms=0.0,
+                retrieval_score=best if isinstance(best, (int, float)) else None,
+            )
+            return {
+                "answer": content,
+                "message_id": asst.id,
+                "answer_type": "abstained",
+                "sources": [s.model_dump(exclude_none=True) for s in sources],
+            }
 
         text = result["text"]
         tokens_in = result.get("tokens_in")
@@ -285,5 +287,6 @@ class RAGService:
                 "tokens_in": tokens_in,
                 "tokens_out": tokens_out,
                 "latency_ms": latency_ms_total,
+                "context_chunks_used": len(sources),
             },
         }

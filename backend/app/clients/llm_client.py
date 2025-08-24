@@ -1,9 +1,9 @@
 # app/clients/llm_client.py
 from __future__ import annotations
-from typing import Dict, List, Optional, Generator, Iterable
+from typing import Dict, List, Optional, Generator, Union, Any
 import time
 
-from openai import OpenAI  # pip install openai>=1.40
+from openai import OpenAI
 from app.config import settings
 
 
@@ -13,8 +13,11 @@ class LLMClient:
     """
 
     def __init__(self, model: Optional[str] = None, temperature: float = 0.2):
-        self.model = model or settings.OPENAI_MODEL  # e.g., "gpt-4o-mini" or "gpt-4.1-mini"
+        self.model = model or settings.OPENAI_MODEL  # e.g. "gpt-4o-mini"
         self.temperature = temperature
+        if not settings.OPENAI_API_KEY:
+            # Fail loudly so you know why calls error
+            raise RuntimeError("OPENAI_API_KEY is not set")
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     def chat(
@@ -25,10 +28,12 @@ class LLMClient:
         messages_history: Optional[List[Dict[str, str]]] = None,
         max_tokens: Optional[int] = None,
         stream: bool = False,
-    ) -> Dict[str, any] | Generator[str, None, Dict[str, any]]:
+    ) -> Union[Dict[str, Any], Generator[str, None, Dict[str, Any]]]:
         """
-        Returns either a dict (non-stream) or a generator of token strings (stream).
-        The final return (for stream) is the same dict with usage.
+        Returns:
+          - dict when stream=False: {"text","model","tokens_in","tokens_out","latency_ms"}
+          - generator when stream=True: yields text deltas; final generator return
+            is the same dict (tokens_in/out often unavailable for streamed chat.completions).
         """
         msgs: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
         if messages_history:
@@ -43,11 +48,11 @@ class LLMClient:
                 max_tokens=max_tokens,
                 messages=msgs,
             )
-            txt = resp.choices[0].message.content or ""
+            txt = (resp.choices[0].message.content or "").strip()
             usage = getattr(resp, "usage", None)
             latency_ms = (time.time() - started) * 1000.0
-            tokens_in = usage.prompt_tokens if usage else None
-            tokens_out = usage.completion_tokens if usage else None
+            tokens_in = getattr(usage, "prompt_tokens", None)
+            tokens_out = getattr(usage, "completion_tokens", None)
             return {
                 "text": txt,
                 "model": self.model,
@@ -56,31 +61,34 @@ class LLMClient:
                 "latency_ms": latency_ms,
             }
 
-        # streaming
-        def _gen() -> Generator[str, None, Dict[str, any]]:
+        # ---- streaming (chunk-based for chat.completions) ----
+        def _gen() -> Generator[str, None, Dict[str, Any]]:
             started = time.time()
-            acc = []
+            acc: List[str] = []
             tokens_in = None
-            tokens_out = 0
-            with self.client.chat.completions.stream(
+            tokens_out = None
+
+            # stream=True returns an iterator of ChatCompletionChunk objects
+            stream_resp = self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=max_tokens,
                 messages=msgs,
-            ) as stream_resp:
-                for event in stream_resp:
-                    if event.type == "response.refusal.delta":
-                        continue
-                    if event.type == "response.output_text.delta":
-                        acc.append(event.delta)
-                        tokens_out += 1
-                        yield event.delta
-                    elif event.type == "response.completed":
-                        tokens_in = event.response.usage.input_tokens
-                        tokens_out = event.response.usage.output_tokens
-                        break
+                stream=True,
+            )
+
+            for chunk in stream_resp:
+                # Each chunk has choices[0].delta.content with partial text
+                try:
+                    delta = chunk.choices[0].delta.content or ""
+                except Exception:
+                    delta = ""
+                if delta:
+                    acc.append(delta)
+                    yield delta
 
             latency_ms = (time.time() - started) * 1000.0
+            # NOTE: chat.completions streaming does not return usage reliably
             return {
                 "text": "".join(acc),
                 "model": self.model,
