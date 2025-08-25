@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.services.auth_service import AuthService
+from app.services.auth_service import AuthService, AuthError
 from app.repositories.user import UserRepository
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -28,7 +28,6 @@ class RegisterResponse(BaseModel):
     user_id: int
     access_token: str
     token_type: str = "bearer"
-    # Echo current session id so frontend can keep/stitch if it changed
     session_id: str
 
 class LoginRequest(BaseModel):
@@ -63,11 +62,6 @@ def register(
     user_repo: UserRepository = Depends(get_user_repo),
     x_session_id: Optional[str] = Header(default=None, convert_underscores=False, alias="X-Session-Id"),
 ):
-    """
-    - If X-Session-Id corresponds to an anonymous user, upgrade that record in-place.
-    - Otherwise create a new user with a fresh UUID session_id.
-    - Duplicate email (owned by a different user) -> 409 Conflict.
-    """
     try:
         user = auth.register_user(db, payload.email, payload.password, session_id=x_session_id)
     except ValueError as e:
@@ -75,9 +69,7 @@ def register(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
         raise
 
-    # Mint an access token for immediate use
     token = auth._create_access_token({"sub": str(user.id)})
-    # Ensure we return the effective session_id for the client to persist
     return RegisterResponse(
         user_id=user.id,
         access_token=token,
@@ -91,10 +83,20 @@ def login(
     db: Session = Depends(get_db),
     auth: AuthService = Depends(get_auth_service),
 ):
-    result = auth.authenticate(db, payload.email, payload.password)
-    if not result:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    return LoginResponse(**result)
+    try:
+        result = auth.authenticate(db, payload.email, payload.password)
+        return LoginResponse(**result)
+    except AuthError as e:
+        # Always 401 to avoid account enumeration, but include a safe error_code for UX branching.
+        # Frontend copy examples:
+        #   NO_ACCOUNT  -> "No account found with this email. Create one?"
+        #   BAD_PASSWORD -> "Incorrect email or password."
+        #   UNEXPECTED  -> "We couldn’t sign you in. Please try again."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.public_detail,
+            headers={"X-Error-Code": e.code},  # optional header
+        )
 
 @router.get("/me", response_model=MeResponse, summary="Return the current authenticated identity")
 def me(

@@ -39,7 +39,7 @@ class IntentService:
     LEXICON = {
         "account": {
             "account", "signup", "register", "verify", "identity", "kyc", "profile", "open",
-            "password", "passcode", "credentials"
+            "password", "passcode", "credentials," "registration"
         },
         "payments": {
             "transfer", "send", "receive", "deposit", "withdraw", "card", "fee", "limit", "payment", "transaction",
@@ -47,7 +47,7 @@ class IntentService:
         },
         "security": {
             "fraud", "phish", "compromise", "password", "2fa", "otp", "lock", "suspend", "secure",
-            "data", "privacy", "encryption", "encrypted", "protect", "protection"
+            "data", "privacy", "encryption", "encrypted", "protect", "protection," "prevention," "security"
         },
         "regulatory": {"kyc", "aml", "compliance", "insure", "insurance", "fdic", "limit", "hold", "regulation"},
         "support": {"bug", "crash", "not working", "support", "contact", "help", "email", "issue", "problem"},
