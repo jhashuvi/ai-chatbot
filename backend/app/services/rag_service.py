@@ -191,7 +191,6 @@ class RAGService:
         chat_session_id: int,
         user_text: str,
         *,
-        stream: bool = False,
         category_hint: Optional[str] = None,
         intent_confidence: Optional[float] = None,
     ):
@@ -269,7 +268,7 @@ class RAGService:
 
         # 6) LLM
         try:
-            result = self.llm.chat(self.SYSTEM_PROMPT, user_prompt, stream=stream)
+            result = self.llm.chat(self.SYSTEM_PROMPT, user_prompt)
         except Exception:
             content = (
                 "I couldn’t reach the model just now. Please try again later, "

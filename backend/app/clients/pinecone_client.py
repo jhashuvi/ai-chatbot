@@ -1,4 +1,8 @@
 # app/clients/pinecone_client.py
+"""
+Pinecone client for integrated-inference vector search with automatic text embedding.
+Normalizes various response formats (good for recognizing drift)
+"""
 from __future__ import annotations
 from typing import Any, Dict, List, Tuple, Optional, Union
 from pinecone import Pinecone
@@ -12,7 +16,7 @@ def _to_matches(res: Any) -> List[Dict[str, Any]]:
       - d["data"]["matches"]
       - d["results"][0]["matches"]
       - d["result"]["matches"]
-      - d["result"]["hits"]  <-- new “search records” shape (your SDK)
+      - d["result"]["hits"]  
     """
     # 1) Produce a plain dict view of the OpenAPI model
     d: Dict[str, Any]
@@ -105,7 +109,6 @@ def _to_matches(res: Any) -> List[Dict[str, Any]]:
             if not isinstance(md, dict):
                 md = {}
 
-            # Add common useful fields into metadata if present
             for k in ("source", "title", "filename", "category"):
                 if k in fields and k not in md:
                     md[k] = fields[k]
@@ -119,29 +122,29 @@ def _to_matches(res: Any) -> List[Dict[str, Any]]:
 
 class PineconeClient:
     """
-    Client for an integrated-inference Pinecone index (model: llama-text-embed-v2).
-    Sends raw text; Pinecone embeds and returns nearest neighbors.
+    Uses model: llama-text-embed-v2.
+    Sends raw text; Pinecone embeds and finds similar chunks.
     """
     def __init__(self, namespace: str = "__default__"):
         self.pc = Pinecone(api_key=settings.PINECONE_API_KEY)
         self.idx = self.pc.Index(settings.PINECONE_INDEX, host=(settings.PINECONE_HOST or None))
-        # API 2025-04 requires explicit "__default__" for the default records namespace
         self.namespace = namespace or "__default__"
 
     def search(self, text: str, top_k: int = 5) -> Tuple[List[Dict[str, Any]], Optional[float]]:
+        # Build Pinecone search payload and run search
         payload = {"inputs": {"text": text}, "top_k": top_k}
         res = self.idx.search(namespace=self.namespace, query=payload)
-        raw = _to_matches(res)
+        raw = _to_matches(res)  # Normalize Pinecone response to list of dicts
 
-        # If nothing recognized, helpful debug
+        # Warn if nothing recognized
         if not raw:
             print("[debug] Pinecone returned no recognized matches; type:", type(res))
 
         chunks: List[Dict[str, Any]] = []
-        best = 0.0
+        best = 0.0  # Track best score
 
         for m in raw:
-            # Two sources: legacy "matches" (id/score/metadata) or new hits normalized above
+            # Handle both dict and object match types
             if not isinstance(m, dict):
                 m = {
                     "id": getattr(m, "id", None),
@@ -150,7 +153,7 @@ class PineconeClient:
                 }
 
             md = m.get("metadata") or {}
-            # Prefer the pre-extracted text (from hits) if present
+            # Prefer normalized text fields, fallback to metadata
             content = (
                 m.get("_text")
                 or md.get("text")
@@ -160,6 +163,7 @@ class PineconeClient:
                 or md.get("raw")
                 or ""
             )
+            # Try to get a source label
             source = md.get("source") or md.get("filename") or md.get("title") or "unknown"
 
             score = m.get("score")
@@ -168,8 +172,9 @@ class PineconeClient:
             except Exception:
                 score_f = None
             if score_f is not None and score_f > best:
-                best = score_f
+                best = score_f  # Track highest score
 
+            # Add normalized chunk to output
             chunks.append({
                 "chunk_id": m.get("id") or md.get("id") or "",
                 "content": content,
@@ -178,6 +183,7 @@ class PineconeClient:
                 "score": score_f,
             })
 
+        # Return all chunks and the best score (if any)
         return chunks, (best if best > 0 else None)
 
 PineconeIntegratedClient = PineconeClient

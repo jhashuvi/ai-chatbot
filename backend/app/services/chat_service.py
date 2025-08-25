@@ -124,7 +124,6 @@ class ChatService:
         chat_session_id: int,
         user_text: str,
         *,
-        stream: bool = False,
         history_size: int = 6,
     ):
         """
@@ -149,7 +148,6 @@ class ChatService:
                     db,
                     chat_session_id,
                     result.processed_query,
-                    stream=stream,
                     category_hint=result.signals.get("category_hint"),
                     intent_confidence=result.confidence,
                 )

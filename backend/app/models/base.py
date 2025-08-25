@@ -1,6 +1,5 @@
 """
 Base model class that provides common fields for all database entities.
-This ensures consistency across our models and provides audit trails.
 """
 
 from datetime import datetime
@@ -25,7 +24,7 @@ class BaseModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    # String representation for debugging purposes
     def __repr__(self) -> str:
-        # Generic, helpful repr for debugging in dev
         cls = self.__class__.__name__
         return f"<{cls}(id={getattr(self, 'id', None)})>"

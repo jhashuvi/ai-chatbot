@@ -1,6 +1,5 @@
 """
-Base repository class with common CRUD operations.
-Provides a consistent interface for all data access operations.
+Base repository class that provides a consistent interface for all data access operations.
 """
 
 from typing import TypeVar, Generic, Type, Optional, List, Any, Dict, Union
@@ -29,25 +28,11 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
     """
     
     def __init__(self, model: Type[T]):
-        """
-        Initialize repository with a specific model.
-        
-        Args:
-            model: SQLAlchemy model class
-        """
+        """Initialize repository with a specific model."""
         self.model = model
     
     def get(self, db: Session, id: int) -> Optional[T]:
-        """
-        Get a single record by ID.
-        
-        Args:
-            db: Database session
-            id: Record ID
-            
-        Returns:
-            Model instance or None if not found
-        """
+        """Get a single record by ID."""
         try:
             return db.query(self.model).filter(self.model.id == id).first()
         except Exception as e:
@@ -61,18 +46,7 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
         limit: int = 100,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[T]:
-        """
-        Get multiple records with pagination and filtering.
-        
-        Args:
-            db: Database session
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            filters: Dictionary of field filters
-            
-        Returns:
-            List of model instances
-        """
+        """Get multiple records with pagination and filtering."""
         try:
             query = db.query(self.model)
             
@@ -91,34 +65,9 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
             logger.error(f"Error getting multiple {self.model.__name__}: {e}")
             raise
     
-    # def create(self, db: Session, obj_in: CreateSchemaType) -> T:
-    #     """
-    #     Create a new record.
-    #     
-    #     Args:
-    #         db: Database session
-    #         obj_in: Pydantic schema with creation data
-    #         
-    #     Returns:
-    #         Created model instance
-    #     """
-    #     try:
-    #         # Convert Pydantic schema to dict, excluding unset fields
-    #         obj_data = obj_in.model_dump(exclude_unset=True)
-    #         db_obj = self.model(**obj_data)
-    #         
-    #         db.add(db_obj)
-    #         db.flush()  # Flush to get the ID
-    #         db.refresh(db_obj)
-    #         
-    #         logger.info(f"Created {self.model.__name__} with id {db_obj.id}")
-    #         return db_obj
-    #     except Exception as e:
-    #         logger.error(f"Error creating {self.model.__name__}: {e}")
-    #         db.rollback()
-    #         raise
     
     def create(self, db: Session, obj_in: Union[CreateSchemaType, dict]) -> T:
+        """Create a new record in the database."""
         try:
             obj_data = self._to_dict(obj_in)
             obj_data = self._filter_model_fields(obj_data)
@@ -133,45 +82,8 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
             db.rollback()
             raise
 
-
-    # def update(
-    #     self, 
-    #     db: Session, 
-    #     db_obj: T, 
-    #     obj_in: UpdateSchemaType
-    # ) -> T:
-    #     """
-    #     Update an existing record.
-    #     
-    #     Args:
-    #         db: Database session
-    #         db_obj: Existing model instance
-    #         obj_in: Pydantic schema with update data
-    #         
-    #     Returns:
-    #         Updated model instance
-    #     """
-    #     try:
-    #         # Convert Pydantic schema to dict, excluding unset fields
-    #         update_data = obj_in.model_dump(exclude_unset=True)
-    #         
-    #         # Update only provided fields
-    #         for field, value in update_data.items():
-    #             if hasattr(db_obj, field):
-    #                 setattr(db_obj, field, value)
-    #         
-    #         db.add(db_obj)
-    #         db.flush()
-    #         db.refresh(db_obj)
-    #         
-    #         logger.info(f"Updated {self.model.__name__} with id {db_obj.id}")
-    #         return db_obj
-    #     except Exception as e:
-    #         logger.error(f"Error updating {self.model.__name__} with id {db_obj.id}: {e}")
-    #         db.rollback()
-    #         raise
-    
     def update(self, db: Session, db_obj: T, obj_in: Union[UpdateSchemaType, dict]) -> T:
+        """Update an existing record in the database."""
         try:
             update_data = self._to_dict(obj_in)
             update_data = self._filter_model_fields(update_data)
@@ -189,16 +101,7 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
             raise
 
     def delete(self, db: Session, id: int) -> bool:
-        """
-        Delete a record by ID.
-        
-        Args:
-            db: Database session
-            id: Record ID
-            
-        Returns:
-            True if deleted, False if not found
-        """
+        """Delete a record by ID."""
         try:
             db_obj = db.query(self.model).filter(self.model.id == id).first()
             if db_obj:
@@ -213,16 +116,7 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
             raise
     
     def count(self, db: Session, filters: Optional[Dict[str, Any]] = None) -> int:
-        """
-        Count records with optional filtering.
-        
-        Args:
-            db: Database session
-            filters: Dictionary of field filters
-            
-        Returns:
-            Number of matching records
-        """
+        """Count records with optional filtering."""
         try:
             query = db.query(self.model)
             
@@ -242,16 +136,7 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
             raise
     
     def exists(self, db: Session, id: int) -> bool:
-        """
-        Check if a record exists by ID.
-        
-        Args:
-            db: Database session
-            id: Record ID
-            
-        Returns:
-            True if exists, False otherwise
-        """
+        """Check if a record exists by ID."""
         try:
             return db.query(self.model).filter(self.model.id == id).first() is not None
         except Exception as e:
@@ -259,10 +144,12 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
             raise
     
     def _filter_model_fields(self, data: dict) -> dict:
+        """Filter data to only include valid model fields."""
         cols = {c.key for c in self.model.__table__.columns}
         return {k: v for k, v in data.items() if k in cols}
 
     def _to_dict(self, obj: Any) -> dict:
+        """Convert Pydantic model or dict to dictionary."""
         # Pydantic v2
         if hasattr(obj, "model_dump"):
             return obj.model_dump(exclude_unset=True)

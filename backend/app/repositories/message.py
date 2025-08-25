@@ -1,8 +1,6 @@
 """
 Message repository for managing chat messages.
-Handles message storage, retrieval, and RAG context management.
 """
-
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, func
@@ -16,7 +14,6 @@ from ..schemas.message import MessageCreate, MessageUpdate
 
 logger = logging.getLogger(__name__)
 
-
 class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
     """
     Repository for message management operations.
@@ -26,21 +23,27 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
     def __init__(self):
         super().__init__(Message)
 
-    # ---------- Helpers (internal) ----------
+    # ---------- Helper Functions ----------
 
     def _touch_session_on_new_message(self, db: Session, session_id: int, is_assistant: bool) -> None:
         """Increment counters and bump recency on the parent session."""
+        # Find the parent session to update its metadata
         session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
         if not session:
             return
+        
+        # Increment total message count
         session.message_count = (session.message_count or 0) + 1
+        
+        # Track assistant messages separately for analytics
         if is_assistant:
             session.assistant_message_count = (session.assistant_message_count or 0) + 1
+        
+        # Update last activity timestamp for sorting/recency
         session.last_message_at = datetime.utcnow()
-        # Keep is_active unless explicitly archived elsewhere
+        
+        # Keep session active unless explicitly archived elsewhere
         db.add(session)
-
-    # ---------- Queries ----------
 
     def get_by_session_id(
         self,
@@ -54,8 +57,12 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
         """Get messages for a session with pagination; default chronological order."""
         try:
             q = db.query(Message).filter(Message.chat_session_id == chat_session_id)
+            
+            # Optional filter by message role (user/assistant)
             if role:
                 q = q.filter(Message.role == role)
+            
+            # Order by creation time - ascending for chronological, descending for reverse
             q = q.order_by(Message.created_at if ascending else desc(Message.created_at))
             return q.offset(skip).limit(limit).all()
         except Exception as e:
@@ -68,10 +75,9 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
         chat_session_id: int,
         limit: int = 10
     ) -> List[Message]:
-        """
-        Get the most recent 'limit' messages, returned oldest→newest for prompt assembly.
-        """
+        """Get the most recent messages, returned oldest→newest for prompt assembly."""
         try:
+            # Get recent messages in reverse chronological order (newest first)
             recent = (
                 db.query(Message)
                 .filter(Message.chat_session_id == chat_session_id)
@@ -79,12 +85,11 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
                 .limit(limit)
                 .all()
             )
+            # Reverse to get chronological order (oldest first) for LLM context
             return list(reversed(recent))
         except Exception as e:
             logger.error(f"get_conversation_history failed (session={chat_session_id}): {e}")
             raise
-
-    # ---------- Mutations ----------
 
     def create_user_message(
         self,
@@ -94,11 +99,14 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
     ) -> Message:
         """Create a user message and bump session recency/counters."""
         try:
+            # Create the message record
             msg = self.create(db, MessageCreate(
                 content=content,
                 chat_session_id=chat_session_id,
                 role="user"
             ))
+            
+            # Update session metadata (counters, timestamps)
             self._touch_session_on_new_message(db, chat_session_id, is_assistant=False)
             db.flush()
             return msg
@@ -133,10 +141,9 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
         retrieval_score: Optional[float] = None,
         flagged: Optional[bool] = None,
     ) -> Message:
-        """
-        Create an assistant message with evidence and metrics in one call.
-        """
+        """Create an assistant message with evidence and metrics in one call."""
         try:
+            # Create the base message record
             msg = self.create(db, MessageCreate(
                 content=content,
                 chat_session_id=chat_session_id,
@@ -144,7 +151,10 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
             ))
 
             # Build minimal update payload; only set fields that are provided
+            # This avoids overwriting fields with None when they weren't meant to be updated
             update_payload: Dict[str, Any] = {}
+            
+            # RAG-related fields
             if sources is not None:           update_payload["sources"] = sources
             if retrieval_params is not None:  update_payload["retrieval_params"] = retrieval_params
             if retrieval_stats is not None:   update_payload["retrieval_stats"] = retrieval_stats
@@ -152,24 +162,27 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
             if answer_type is not None:       update_payload["answer_type"] = answer_type
             if error_type is not None:        update_payload["error_type"] = error_type
 
+            # Model metadata
             if citations is not None:         update_payload["citations"] = citations
             if model_used is not None:        update_payload["model_used"] = model_used
             if model_provider is not None:    update_payload["model_provider"] = model_provider
 
-            # Prefer separate in/out, keep tokens_used for back-compat/analytics
+            # Token usage - prefer separate in/out, keep tokens_used for back-compat/analytics
             if tokens_in is not None:         update_payload["tokens_in"] = tokens_in
             if tokens_out is not None:        update_payload["tokens_out"] = tokens_out
             if tokens_in is not None or tokens_out is not None:
                 total = (tokens_in or 0) + (tokens_out or 0)
                 update_payload["tokens_used"] = total
 
+            # Performance and quality metrics
             if latency_ms is not None:        update_payload["latency_ms"] = latency_ms
             if retrieval_score is not None:   update_payload["retrieval_score"] = retrieval_score
             if flagged is not None:           update_payload["flagged"] = flagged
 
+            # Update the message with all the metadata
             msg = self.update(db, msg, MessageUpdate(**update_payload))
 
-            # bump session counters/recency
+            # Update session metadata (counters, timestamps)
             self._touch_session_on_new_message(db, chat_session_id, is_assistant=True)
             db.flush()
             return msg
@@ -189,9 +202,12 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
             msg = self.get(db, message_id)
             if not msg:
                 raise ValueError(f"Message {message_id} not found")
+            
+            # Only allow feedback on assistant messages (not user messages)
             if not msg.is_assistant_message:
                 raise ValueError("Can only provide feedback on assistant messages")
 
+            # Update the feedback field
             updated = self.update(db, msg, MessageUpdate(user_feedback=feedback))
             return updated
         except Exception as e:
@@ -209,30 +225,34 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
     ) -> Dict[str, Any]:
         """Basic analytics with latency and token summaries on assistant messages."""
         try:
+            # Build base query - filter by session or user
             base_q = db.query(Message)
             if chat_session_id:
                 base_q = base_q.filter(Message.chat_session_id == chat_session_id)
             elif user_id:
+                # Join with chat session to filter by user
                 base_q = base_q.join(Message.chat_session).filter(
                     Message.chat_session.has(user_id=user_id)
                 )
 
+            # Basic message counts
             total_messages = base_q.count()
             user_messages = base_q.filter(Message.role == "user").count()
             assistant_messages = base_q.filter(Message.role == "assistant").count()
 
-            # Assistant-only aggregates
+            # Assistant-only aggregates (for performance metrics)
             asst_q = base_q.filter(Message.role == "assistant")
 
+            # Performance metrics
             avg_latency = asst_q.with_entities(func.avg(Message.latency_ms)).scalar() or 0
             total_tokens_in = asst_q.with_entities(func.sum(Message.tokens_in)).scalar() or 0
             total_tokens_out = asst_q.with_entities(func.sum(Message.tokens_out)).scalar() or 0
 
-            # Feedback stats
+            # User feedback statistics
             positive = asst_q.filter(Message.user_feedback == 1).count()
             negative = asst_q.filter(Message.user_feedback == -1).count()
 
-            # Retrieval quality (best_score mirrored to retrieval_score for quick scans)
+            # Retrieval quality metrics
             avg_retrieval_score = asst_q.with_entities(func.avg(Message.retrieval_score)).scalar() or 0
 
             return {
@@ -251,7 +271,7 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
             logger.error(f"get_message_analytics failed: {e}")
             raise
 
-    # ---------- Search ----------
+    # ---------- Search Functions ----------
 
     def search_messages(
         self,
@@ -263,17 +283,20 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
     ) -> List[Message]:
         """Simple LIKE search over message content for a given user."""
         try:
+            # Create SQL LIKE pattern for partial matching
             pattern = f"%{search_term}%"
+            
+            # Search across all messages for the user
             return (
                 db.query(Message)
-                .join(Message.chat_session)
+                .join(Message.chat_session)  # Join to get user relationship
                 .filter(
                     and_(
-                        Message.chat_session.has(user_id=user_id),
-                        Message.content.ilike(pattern),
+                        Message.chat_session.has(user_id=user_id),  # Filter by user
+                        Message.content.ilike(pattern),             # Search in content
                     )
                 )
-                .order_by(desc(Message.created_at))
+                .order_by(desc(Message.created_at))  # Most recent first
                 .offset(skip)
                 .limit(limit)
                 .all()
@@ -290,10 +313,11 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
     ) -> List[Message]:
         """List messages flagged for review."""
         try:
+            # Get all messages that have been flagged for moderation/review
             return (
                 db.query(Message)
-                .filter(Message.flagged.is_(True))
-                .order_by(desc(Message.created_at))
+                .filter(Message.flagged.is_(True))  # Only flagged messages
+                .order_by(desc(Message.created_at))  # Most recent first
                 .offset(skip)
                 .limit(limit)
                 .all()

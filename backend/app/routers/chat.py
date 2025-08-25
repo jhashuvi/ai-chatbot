@@ -30,7 +30,6 @@ def get_message_repo() -> MessageRepository:
 class ChatRequest(BaseModel):
     session_id: int = Field(..., ge=1, description="Existing chat_session.id")
     message: str = Field(..., min_length=1, description="User message text")
-    stream: bool = Field(False, description="If True, service may stream (router still returns non-stream response)")
     history_size: int = Field(6, ge=0, le=50, description="Recent history messages to bias intent")
 
 class ChatResponse(BaseModel):
@@ -71,7 +70,6 @@ def chat(
             db,
             payload.session_id,
             payload.message,
-            stream=payload.stream,
             history_size=payload.history_size,
         )
     except HTTPException:

@@ -195,7 +195,7 @@ Category:"""
 
         try:
             t0 = time.time()
-            result = self._llm.chat(system_prompt, user_prompt, stream=False)
+            result = self._llm.chat(system_prompt, user_prompt)
             llm_latency = (time.time() - t0) * 1000.0
 
             llm_intent = (result.get("text") or "").strip().lower()

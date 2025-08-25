@@ -1,8 +1,6 @@
 """
 User model for handling both anonymous and authenticated users.
-Supports session-based tracking for anonymous users and JWT authentication for returning users.
 """
-
 from sqlalchemy import Column, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from .base import BaseModel
@@ -25,7 +23,6 @@ class User(BaseModel):
     __tablename__ = "users"
     
     # Session identifier - used for both anonymous and authenticated users
-    # This allows us to track users across browser sessions
     session_id = Column(String(255), unique=True, index=True, nullable=False)
     
     # Email for authenticated users (nullable for anonymous users)
@@ -37,11 +34,10 @@ class User(BaseModel):
     # Whether this user has authenticated (False for anonymous users)
     is_authenticated = Column(Boolean, default=False, nullable=False)
     
-    # Last login timestamp for analytics
+    # Last login timestamp 
     last_login_at = Column(DateTime, nullable=True)
     
     # Relationship to chat sessions - one user can have many chats
-    # This creates a foreign key relationship in the ChatSession model
     chat_sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):

@@ -57,11 +57,7 @@ class _FakeLLMClient:
     def __init__(self, reply="Grounded answer with citations [1].", model="fake-llm"):
         self._reply = reply
         self.model = model
-    def chat(self, system: str, user: str, stream: bool = False):
-        if stream:
-            def _gen():
-                yield self._reply
-            return _gen()
+    def chat(self, system: str, user: str):
         return {"text": self._reply, "tokens_in": 42, "tokens_out": 84, "latency_ms": 12.3}
 
 # ---------- Wiring helpers ----------
@@ -112,7 +108,7 @@ def test_rag_service():
 
         rag = make_rag_service()
         q = "How do I verify my identity?"
-        out = rag.answer(db, session.id, q, stream=False)
+        out = rag.answer(db, session.id, q)
 
         after_count = db.query(func.count()).select_from(msg_repo.model).scalar()
 
