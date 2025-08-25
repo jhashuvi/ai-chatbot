@@ -1,8 +1,13 @@
-// src/types/api.ts — aligned with your backend contracts
+// src/types/api.ts
+/**
+ * TypeScript type definitions for the chatbot API.
+ * These interfaces match the backend API contracts and response structures.
+ */
 
+// User account information
 export interface User {
   id: number;
-  session_id?: string; // may not be present in /auth/me
+  session_id?: string; // May not be present in /auth/me
   email?: string;
   is_authenticated: boolean;
   last_login_at?: string;
@@ -10,7 +15,7 @@ export interface User {
   updated_at: string;
 }
 
-// src/types/api.ts
+// Chat session information
 export interface ChatSession {
   id: number;
   title?: string;
@@ -19,13 +24,14 @@ export interface ChatSession {
   is_active: boolean;
   message_count: number;
   assistant_message_count: number;
-  last_message_at?: string; // <-- make optional to match real payloads
+  last_message_at?: string; // Optional to match real payloads
   ended_at?: string;
   user_id: number;
   created_at: string;
   updated_at: string;
 }
 
+// Source reference for RAG citations
 // Matches schemas/common.SourceRef (all optional except id)
 export interface SourceRef {
   id: string;
@@ -40,9 +46,10 @@ export interface SourceRef {
   index_name?: string;
   namespace?: string;
   model_name?: string;
-  // (Backend SourceRef doesn't define `metadata`; omit to avoid assumptions)
+  // Backend SourceRef doesn't define `metadata`; omit to avoid assumptions
 }
 
+// Complete message with all metadata
 export interface Message {
   id: number;
   role: "user" | "assistant";
@@ -58,7 +65,7 @@ export interface Message {
   error_type?: string;
   citations?: Record<string, any>;
 
-  // Usage/perf
+  // Usage and performance metrics
   model_used?: string;
   model_provider?: string;
   tokens_in?: number;
@@ -67,7 +74,7 @@ export interface Message {
   latency_ms?: number;
   retrieval_score?: number;
 
-  // Feedback/moderation
+  // Feedback and moderation
   user_feedback?: number; // -1 | 0 | 1
   flagged: boolean;
 
@@ -75,6 +82,7 @@ export interface Message {
   updated_at: string;
 }
 
+// Simplified message shape for chat history
 // Narrow shape returned by GET /chat/history
 export interface HistoryItem {
   id: number;
@@ -83,11 +91,13 @@ export interface HistoryItem {
   created_at: string;
 }
 
+// Chat history response wrapper
 export interface HistoryResponse {
   session_id: number;
-  messages: HistoryItem[]; // not full Message[]
+  messages: HistoryItem[]; // Not full Message objects
 }
 
+// Response from sending a message to the chatbot
 export interface ChatResponse {
   answer: string;
   answer_type: "grounded" | "abstained" | "fallback";
@@ -97,38 +107,44 @@ export interface ChatResponse {
   metrics?: Record<string, any>;
 }
 
+// Authentication response from login/register
 export interface AuthResponse {
   user_id: number;
   access_token: string;
   token_type: string;
-  session_id?: string; // returned on /auth/register
+  session_id?: string; // Returned on /auth/register
 }
 
+// Registration response (always includes session_id)
 export interface RegisterResponse {
   user_id: number;
   access_token: string;
   token_type: string; // "bearer"
-  session_id: string; // ALWAYS returned by /auth/register
+  session_id: string; // Always returned by /auth/register
 }
 
+// Login response (no session_id)
 export interface LoginResponse {
   user_id: number;
   access_token: string;
   token_type: string; // "bearer"
 }
 
+// Current user information from /auth/me
 export interface MeResponse {
   user_id: number;
   email?: string;
   is_authenticated: boolean;
 }
 
-// Sessions list wrapper and summary (used by /sessions and /sessions/summary)
+// Sessions list wrapper and summary
+// Used by /sessions and /sessions/summary endpoints
 export interface ListSessionsResponse {
   items: ChatSession[];
   next_cursor: string | null;
 }
 
+// Summary statistics for all sessions
 export interface SessionsSummary {
   total_sessions: number;
   active_sessions: number;

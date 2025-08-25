@@ -1,4 +1,8 @@
 // src/components/ChatInterface.tsx
+/**
+ * Main chat interface component for the chatbot application.
+ * Handles message sending, session management, and real-time chat interactions.
+ */
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
@@ -15,8 +19,6 @@ import type {
   ChatSession,
 } from "@/types/api";
 
-// A flexible item that can be either a minimal HistoryItem
-// or a richer Message produced optimistically after sends.
 type ChatTurn = HistoryItem & Partial<Message>;
 
 type ViewState = "booting" | "switching" | "ready";
@@ -24,6 +26,7 @@ type ViewState = "booting" | "switching" | "ready";
 const ACTIVE_SESSION_KEY = "active_session_id";
 
 export default function ChatInterface() {
+  // Component state management
   const [viewState, setViewState] = useState<ViewState>("booting");
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [currentMessage, setCurrentMessage] = useState("");
@@ -35,9 +38,10 @@ export default function ChatInterface() {
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Reference for auto-scrolling to bottom of messages
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // ---- Helpers: persist/restore active session id ----
+  // ---- Session persistence helpers ----
   const saveActiveSessionId = (id: number) => {
     if (typeof window !== "undefined") {
       localStorage.setItem(ACTIVE_SESSION_KEY, String(id));
@@ -51,21 +55,23 @@ export default function ChatInterface() {
     return Number.isFinite(n) ? n : null;
   };
 
-  // ---- Scroll to bottom on new messages ----
+  // ---- Auto-scroll to bottom when new messages arrive ----
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ---- Boot: ensure session header, fetch sessions, select one, load history ----
+  // ---- Application sequence ----
   useEffect(() => {
     (async () => {
       try {
         setViewState("booting");
         ensureSessionId();
 
+        // Load available chat sessions
         const list = await chatApi.listSessions();
         setSessions(list);
 
+        // Select appropriate session (preferred or first available)
         let selected: ChatSession | null = null;
         const preferred = loadActiveSessionId();
 
@@ -85,7 +91,7 @@ export default function ChatInterface() {
         setCurrentSession(selected);
         saveActiveSessionId(selected.id);
 
-        // Load history for selected session
+        // Load chat history for selected session
         const history = await chatApi.getChatHistory(selected.id);
         setMessages(history);
         setViewState("ready");
@@ -102,7 +108,7 @@ export default function ChatInterface() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Switch session (keep current view until swapped) ----
+  // ---- Session switching logic ----
   const selectSession = async (session: ChatSession) => {
     if (currentSession?.id === session.id) {
       setSidebarOpen(false);
@@ -115,6 +121,7 @@ export default function ChatInterface() {
       setCurrentSession(session);
       saveActiveSessionId(session.id);
 
+      // Load history for new session
       const history = await chatApi.getChatHistory(session.id);
       setMessages(history); // swap atomically
       setViewState("ready");
@@ -130,7 +137,7 @@ export default function ChatInterface() {
     }
   };
 
-  // ---- Create new session ----
+  // ---- Create new chat session ----
   const createNewSession = async () => {
     try {
       setError("");
@@ -147,7 +154,7 @@ export default function ChatInterface() {
     }
   };
 
-  // Make a nice title candidate from the user’s first message
+  // ---- Generate session title from first message ----
   const makeTitleCandidate = (raw: string) => {
     let candidate = raw.trim().replace(/\s+/g, " ");
     if (candidate.length > 60) {
@@ -160,14 +167,14 @@ export default function ChatInterface() {
       : "New chat";
   };
 
-  // ---- Send message (optimistic UI) ----
+  // ---- Send message with UI updates ----
   const sendMessage = async () => {
     if (!currentMessage.trim() || !currentSession || isLoading) return;
 
     const nowISO = new Date().toISOString();
     const tempUserId = Date.now();
 
-    // Optimistic user turn
+    // Add optimistic user message immediately
     const userTurn: ChatTurn = {
       id: tempUserId,
       role: "user",
@@ -176,7 +183,7 @@ export default function ChatInterface() {
     };
     setMessages((prev) => [...prev, userTurn]);
 
-    // Optimistically update title if empty
+    // Update session title optimistically if empty
     if (
       !currentSession.title ||
       currentSession.title.toLowerCase() === "new chat"
@@ -196,17 +203,19 @@ export default function ChatInterface() {
     setError("");
 
     try {
+      // Send message to backend
       const resp: ChatResponse = await chatApi.sendMessage(
         toSend,
         currentSession.id
       );
 
+      // Add assistant response to messages
       const assistantTurn: ChatTurn = {
         id: resp.message_id || tempUserId + 1,
         role: "assistant",
         content: resp.answer,
         created_at: new Date().toISOString(),
-        // Optional RAG bits for rendering
+        // Optional RAG metadata for rendering
         sources: (resp.sources as SourceRef[]) || [],
         answer_type: resp.answer_type,
         retrieval_stats: resp.metrics || undefined,
@@ -214,7 +223,7 @@ export default function ChatInterface() {
 
       setMessages((prev) => [...prev, assistantTurn]);
 
-      // Nudge list recency in UI (backend maintains truth)
+      // Update session metadata in UI
       setSessions((prev) =>
         prev.map((s) =>
           s.id === currentSession.id
@@ -236,6 +245,7 @@ export default function ChatInterface() {
         "Failed to send message. Please try again.";
       setError(msg);
 
+      // Add error message to chat
       const errorTurn: ChatTurn = {
         id: Date.now() + 1,
         role: "assistant",
@@ -249,6 +259,7 @@ export default function ChatInterface() {
     }
   };
 
+  // ---- Handle Enter key for sending messages ----
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -256,7 +267,7 @@ export default function ChatInterface() {
     }
   };
 
-  // Convert a ChatTurn to a Message-like shape for MessageBubble
+  // ---- Convert ChatTurn to Message format for MessageBubble ----
   const toMessageLike = (m: ChatTurn): Message => ({
     id: m.id,
     role: m.role,
@@ -282,13 +293,13 @@ export default function ChatInterface() {
     user_feedback: m.user_feedback,
   });
 
-  // Render condition flags
+  // ---- Render condition flags ----
   const showEmptyHero = viewState === "ready" && messages.length === 0;
   const showThinking = isLoading || viewState === "switching";
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
+      {/* Sidebar with session list */}
       <Sidebar
         sessions={sessions}
         currentSession={currentSession}
@@ -298,9 +309,9 @@ export default function ChatInterface() {
         onToggle={() => setSidebarOpen(!sidebarOpen)}
       />
 
-      {/* Main Chat Area */}
+      {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
+        {/* Header with session title and menu toggle */}
         <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <button
@@ -321,10 +332,11 @@ export default function ChatInterface() {
           </div>
         </div>
 
-        {/* Messages Area */}
+        {/* Messages display area */}
         <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-4">
           <div className="max-w-4xl mx-auto relative">
             {showEmptyHero ? (
+              // Welcome screen for empty chats
               <div className="flex items-center justify-center min-h-[60vh]">
                 <div className="text-center max-w-2xl mx-auto px-4">
                   <div className="relative mb-8">
@@ -351,7 +363,7 @@ export default function ChatInterface() {
                   </h1>
 
                   <p className="text-lg text-gray-600 mb-8 leading-relaxed font-light">
-                    Ask about accounts, transactions, policies, or docs. I’ll
+                    Ask about accounts, transactions, policies, or docs. I'll
                     pull relevant sources and explain clearly.
                   </p>
 
@@ -370,12 +382,13 @@ export default function ChatInterface() {
                       />
                     </svg>
                     <span className="text-sm font-medium">
-                      Press Enter to send, Shift+Enter for newline
+                      Press Enter to send!
                     </span>
                   </div>
                 </div>
               </div>
             ) : (
+              // Message list
               <div className="space-y-1">
                 {messages.map((m) => (
                   <MessageBubble key={m.id} message={toMessageLike(m)} />
@@ -386,6 +399,7 @@ export default function ChatInterface() {
               </div>
             )}
 
+            {/* Loading indicator */}
             {showThinking && !showEmptyHero && (
               <div className="flex justify-start mb-6 mt-3">
                 <div className="flex space-x-3">
@@ -410,6 +424,7 @@ export default function ChatInterface() {
           </div>
         </div>
 
+        {/* Error message display */}
         {error && (
           <div className="px-4 lg:px-6 py-2">
             <div className="max-w-4xl mx-auto bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
@@ -418,7 +433,7 @@ export default function ChatInterface() {
           </div>
         )}
 
-        {/* Input Area */}
+        {/* Message input area */}
         <div className="bg-white border-t border-gray-200 px-4 lg:px-6 py-4">
           <div className="max-w-4xl mx-auto">
             <div className="flex space-x-3">
@@ -444,7 +459,7 @@ export default function ChatInterface() {
               </button>
             </div>
             <div className="text-xs text-gray-500 mt-2 text-center">
-              Press Enter to send, Shift+Enter for new line
+              Press Enter to send.
             </div>
           </div>
         </div>

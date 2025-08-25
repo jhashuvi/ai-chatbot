@@ -1,4 +1,8 @@
 // src/components/MessageBubble.tsx
+/**
+ * Message bubble component for displaying chat messages.
+ * Shows user and assistant messages with metadata, sources, and feedback options.
+ */
 "use client";
 
 import React, { useState } from "react";
@@ -18,28 +22,33 @@ import { chatApi } from "@/lib/api";
 type ChatTurn = HistoryItem & Partial<Message>;
 
 interface MessageBubbleProps {
-  message: ChatTurn; // <-- relaxed: minimal history + optional RAG fields
+  message: ChatTurn;
 }
 
 export default function MessageBubble({ message }: MessageBubbleProps) {
+  // Component state for UI interactions
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [feedback, setFeedback] = useState<number | null>(
     message.user_feedback ?? null
   );
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
+  // Determine if message is from user or assistant
   const isUser = message.role === "user";
 
   const sources = message.sources ?? [];
   const answerType = message.answer_type;
   const hasRAGData = sources.length > 0 || !!answerType;
 
-  // Show only top 5 most relevant sources
+  // Show only top 5 most relevant sources to avoid clutter --> product sense!
   const visibleSources = React.useMemo(
     () => (sources ?? []).slice(0, 5),
     [sources]
   );
 
+  /**
+   * Handle user feedback submission (thumbs up/down)
+   */
   const handleFeedback = async (value: 1 | -1 | 0) => {
     if (submittingFeedback || !message.id || isUser) return; // assistant only
     try {
@@ -53,6 +62,9 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
     }
   };
 
+  /**
+   * Get color styling for confidence levels
+   */
   const getConfidenceColor = (source: SourceRef) => {
     switch (source.confidence_bucket) {
       case "high":
@@ -66,6 +78,9 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
     }
   };
 
+  /**
+   * Format confidence score for display
+   */
   const formatConfidence = (source: SourceRef) => {
     if (typeof source.score_norm === "number") {
       return `${Math.round(source.score_norm * 100)}%`;
@@ -84,6 +99,9 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
     return "N/A";
   };
 
+  /**
+   * Get styling and label for answer types
+   */
   const getAnswerTypeInfo = (type?: string) => {
     switch (type) {
       case "grounded":
@@ -118,7 +136,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           isUser ? "flex-row-reverse" : "flex-row"
         } space-x-3`}
       >
-        {/* Avatar */}
+        {/* User/Assistant avatar */}
         <div className={`flex-shrink-0 ${isUser ? "ml-3" : "mr-3"}`}>
           <div
             className={`w-8 h-8 rounded-full flex items-center justify-center ${
@@ -133,8 +151,9 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           </div>
         </div>
 
-        {/* Message Content */}
+        {/* Message content and metadata */}
         <div className="flex-1 min-w-0">
+          {/* Message text */}
           <div
             className={`rounded-2xl px-4 py-3 ${
               isUser
@@ -149,11 +168,13 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           </div>
 
-          {/* Assistant metadata */}
+          {/* Assistant message metadata and sources */}
           {!isUser && hasRAGData && (
             <div className="mt-3 space-y-2">
+              {/* Metadata row with answer type, timestamp, and feedback */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
+                  {/* Answer type indicator */}
                   {answerTypeInfo && (
                     <div
                       className={`inline-flex items-center space-x-1 px-2 py-1 rounded-full text-xs font-medium ${answerTypeInfo.color}`}
@@ -162,17 +183,20 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                       <span>{answerTypeInfo.label}</span>
                     </div>
                   )}
+                  {/* Timestamp */}
                   <div className="text-xs text-gray-500">
                     {new Date(message.created_at).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
                   </div>
+                  {/* Response latency */}
                   {typeof message.latency_ms === "number" && (
                     <div className="text-xs text-gray-500">
                       {Math.round(message.latency_ms)}ms
                     </div>
                   )}
+                  {/* Error indicator */}
                   {message.error_type && (
                     <div className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded">
                       Error: {message.error_type}
@@ -180,6 +204,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                   )}
                 </div>
 
+                {/* Feedback buttons */}
                 <div className="flex items-center space-x-1">
                   <button
                     onClick={() => handleFeedback(1)}
@@ -208,8 +233,10 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                 </div>
               </div>
 
+              {/* Expandable sources section */}
               {visibleSources.length > 0 && (
                 <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+                  {/* Sources toggle button */}
                   <button
                     onClick={() => setSourcesExpanded((v) => !v)}
                     className="w-full px-4 py-3 text-left hover:bg-gray-100 transition-colors flex items-center justify-between"
@@ -230,6 +257,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                     )}
                   </button>
 
+                  {/* Expanded sources list */}
                   {sourcesExpanded && (
                     <div className="border-t border-gray-200 bg-white">
                       <div className="p-4 space-y-3">
@@ -240,6 +268,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                           >
                             <div className="flex items-start justify-between mb-2">
                               <div className="flex-1">
+                                {/* Source title and category */}
                                 <h4 className="text-sm font-medium text-gray-900">
                                   {source.title || `Source ${i + 1}`}
                                 </h4>
@@ -249,6 +278,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                                   </div>
                                 )}
                               </div>
+                              {/* Confidence score */}
                               <div className="ml-2 flex items-center space-x-2">
                                 <div
                                   className={`px-2 py-1 rounded-full text-xs font-medium border ${getConfidenceColor(
@@ -260,6 +290,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                               </div>
                             </div>
 
+                            {/* Source preview text */}
                             <p className="text-xs text-gray-600 leading-relaxed mb-2">
                               {source.preview || "No preview available"}
                             </p>
