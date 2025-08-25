@@ -98,8 +98,8 @@ class ChatService:
         content: str,
     ):
         """
-        Persist ONLY an assistant message for non-RAG paths.
-        (Skip create_user_message to match your test policy.)
+        Persist the assistant message for non-RAG paths.
+        (User message is now persisted before calling this method.)
         """
         asst = self.msg_repo.create_assistant_message(
             db, chat_session_id, content,
@@ -154,7 +154,9 @@ class ChatService:
                     intent_confidence=result.confidence,
                 )
 
-        # Non-RAG: do NOT persist user message; send a single assistant reply
+        # Non-RAG path: persist the user message too (so history is complete)
+        self.msg_repo.create_user_message(db, chat_session_id, user_text)
+
         content = self._canned_reply_for_intent(result.intent, user_text)
         return self._send_canned(
             db=db,
