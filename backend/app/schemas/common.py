@@ -1,6 +1,6 @@
 """
 Common data structures used across multiple schemas.
-These represent shared concepts like citations, context chunks, metrics,
+These represent concepts like citations, context chunks, metrics,
 and (optionally) embedding/index metadata for diagnostics.
 """
 
@@ -9,11 +9,10 @@ from datetime import datetime
 from pydantic import BaseModel, Field, HttpUrl
 from .base import BaseSchema
 
-
 class EmbeddingInfo(BaseSchema):
     """
     Metadata about the embedding/index used during retrieval.
-    Useful for debugging, audits, and ablation (e.g., switching models or metrics).
+    Part of next steps: Useful for debugging, audits, and ablation (e.g., switching models or metrics).
     """
     model: str = Field(..., description="Embedding model name, e.g. 'llama-text-embed-v2'")
     metric: Optional[Literal["cosine", "dot", "euclidean"]] = Field(
@@ -24,7 +23,6 @@ class EmbeddingInfo(BaseSchema):
     )
     namespace: Optional[str] = Field(None, description="Pinecone namespace used for the query")
     index_name: Optional[str] = Field(None, description="Pinecone index name")
-    # Optional free-form mapping (e.g., Pinecone field_map)
     field_map: Optional[Dict[str, str]] = Field(
         None, description="Field map used by the index for integrated inference (e.g., {'text': 'text'})"
     )
@@ -33,7 +31,6 @@ class EmbeddingInfo(BaseSchema):
 class Citation(BaseSchema):
     """
     Represents a source citation for AI-generated responses.
-    Flexible enough to accept either a rich citation or a minimal (id, score) pair.
     """
     # Preferred unique identifier for the chunk referenced
     chunk_id: Optional[str] = Field(
@@ -48,14 +45,14 @@ class Citation(BaseSchema):
         None, ge=0.0, le=1.0, description="Normalized relevance score (0..1)"
     )
 
-    # Minimal/legacy shape support (if you only have id/score)
+    # Minimal/legacy shape support (if we only have id/score)
     id: Optional[str] = Field(None, description="Generic identifier if chunk_id not provided")
     score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Raw similarity score")
 
 
 class ContextChunk(BaseSchema):
     """
-    Represents a chunk of context retrieved from the knowledge base (Pinecone).
+    Represents a chunk of context retrieved from the knowledge base.
     """
     chunk_id: str = Field(..., description="Unique identifier for this chunk (Pinecone record id)")
     content: str = Field(..., description="The text content of the chunk")
@@ -64,7 +61,6 @@ class ContextChunk(BaseSchema):
         default_factory=dict, description="Original metadata stored alongside the chunk"
     )
 
-    # Retrieval signal (normalized if possible). For cosine, many SDKs return 0..1; keep optional.
     score: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Similarity score for this chunk"
     )
@@ -82,7 +78,7 @@ class ChatMetrics(BaseSchema):
     """
     Performance and analytics metrics for a single assistant turn.
     """
-    # Token usage may not always be available; keep optional
+    # Token usage may not always be available; we keep it optional
     tokens_used: Optional[int] = Field(None, ge=0, description="Number of tokens used in the response")
     latency_ms: Optional[float] = Field(None, ge=0.0, description="End-to-end response latency in milliseconds")
     model_used: Optional[str] = Field(None, description="Generation model used (e.g., 'gpt-4o-mini')")

@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Always point to the repo root .env
 BASE_DIR = Path(__file__).resolve().parents[2]  # /Users/shuvijha/ai-chatbot/ai-chatbot
 env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)

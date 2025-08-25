@@ -1,4 +1,7 @@
 # app/routers/sessions.py
+"""
+Handles session creation, listing, search, deactivation, and analytics.
+"""
 from __future__ import annotations
 from typing import List, Optional
 
@@ -13,31 +16,36 @@ from app.schemas.session import SessionResponse  # response shape aligned to you
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
-# ----- DI providers -----
 def get_user_repo() -> UserRepository:
+    """Get a new UserRepository for this request."""
     return UserRepository()
 
 def get_session_repo() -> ChatSessionRepository:
+    """Get a new ChatSessionRepository for this request."""
     return ChatSessionRepository()
 
 # ----- Request/Response payloads -----
 class CreateSessionRequest(BaseModel):
+    """Request to create a new chat session."""
     title: Optional[str] = Field(None, description="Optional session title")
 
 class ListSessionsResponse(BaseModel):
+    """Paginated list of user sessions."""
     items: List[SessionResponse]
-    next_cursor: Optional[str] = None  # Placeholder if you add cursor pagination later
+    next_cursor: Optional[str] = None  
 
 class SummaryResponse(BaseModel):
+    """User session statistics and analytics."""
     total_sessions: int
     active_sessions: int
     total_messages: int
     average_messages_per_session: float
 
-# ----- Helpers -----
+# ----- Helper Functions -----
 def _require_session_header(x_session_id: Optional[str]) -> str:
+    """Ensure X-Session-Id header is present for user identification."""
     if not x_session_id:
-        # Keep this explicit; frontend should pass a browser/session id for anonymous flow
+        # This is how we identify users even before they register
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing X-Session-Id header",
@@ -45,10 +53,11 @@ def _require_session_header(x_session_id: Optional[str]) -> str:
     return x_session_id
 
 def _ensure_ownership(session_obj, user_id: int):
+    """Verify that a session belongs to the requesting user."""
+    # This prevents users from accessing or modifying other people's sessions
     if not session_obj or session_obj.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-# ----- Routes -----
 @router.post(
     "",
     response_model=SessionResponse,
@@ -61,25 +70,35 @@ def create_session(
     user_repo: UserRepository = Depends(get_user_repo),
     sess_repo: ChatSessionRepository = Depends(get_session_repo),
 ):
+    """
+    Create a new chat session for the current user.
+    
+    This endpoint handles both scenarios:
+    1. Anonymous users (identified by X-Session-Id)
+    2. Authenticated users (same X-Session-Id after login)
+    """
+    # Extract and validate the session header
     session_id_hdr = _require_session_header(x_session_id)
 
     # Get or create the user tied to this browser session
     user = user_repo.get_or_create_user(db, session_id=session_id_hdr)
 
-    # Create the chat session
+    # Create the chat session 
     s = sess_repo.create_session_for_user(db, user_id=user.id, title=payload.title)
 
     # Refresh to ensure timestamps/counters are present
     db.refresh(s)
+    
+    # Return session details in the standardized response format
     return SessionResponse(
         id=s.id,
         created_at=s.created_at,
         updated_at=s.updated_at,
         user_id=s.user_id,
         title=s.title,
-        description=getattr(s, "description", None),
+        description=getattr(s, "description", None), 
         is_active=s.is_active,
-        summary_text=getattr(s, "summary_text", None),
+        summary_text=s.summary_text,
         message_count=s.message_count or 0,
         assistant_message_count=s.assistant_message_count or 0,
         last_message_at=s.last_message_at,
@@ -101,14 +120,22 @@ def list_sessions(
     user_repo: UserRepository = Depends(get_user_repo),
     sess_repo: ChatSessionRepository = Depends(get_session_repo),
 ):
+    """
+    List user's chat sessions with optional filtering and search.
+    """
+    # Identify the user from their browser session
     session_id_hdr = _require_session_header(x_session_id)
     user = user_repo.get_or_create_user(db, session_id=session_id_hdr)
 
+    # Choose between search and regular listing based on search parameter
     if search:
+        # Search sessions by title (description field doesn't exist yet)
         sessions = sess_repo.search_sessions(db, user_id=user.id, search_term=search, skip=skip, limit=limit)
     else:
+        # Get regular list with optional active filter
         sessions = sess_repo.get_by_user_id(db, user_id=user.id, skip=skip, limit=limit, active_only=active_only)
 
+    # Convert database objects to API response format
     items = [
         SessionResponse(
             id=s.id,
@@ -116,9 +143,9 @@ def list_sessions(
             updated_at=s.updated_at,
             user_id=s.user_id,
             title=s.title,
-            description=getattr(s, "description", None),
+            description=getattr(s, "description", None),  
             is_active=s.is_active,
-            summary_text=getattr(s, "summary_text", None),
+            summary_text=s.summary_text,
             message_count=s.message_count or 0,
             assistant_message_count=s.assistant_message_count or 0,
             last_message_at=s.last_message_at,
@@ -127,7 +154,6 @@ def list_sessions(
         for s in sessions
     ]
 
-    # Simple offset pagination for now; add real cursor later if needed
     return ListSessionsResponse(items=items, next_cursor=None)
 
 @router.post(
@@ -142,18 +168,23 @@ def deactivate_session(
     user_repo: UserRepository = Depends(get_user_repo),
     sess_repo: ChatSessionRepository = Depends(get_session_repo),
 ):
+    """
+    Archive a chat session by marking it as inactive. This doesn't delete the session or messages, just marks it as ended.
+    """
+    # Identify the user making the request
     session_id_hdr = _require_session_header(x_session_id)
     user = user_repo.get_or_create_user(db, session_id=session_id_hdr)
 
-    # Ownership check
+    # Verify the session exists and belongs to this user
     s = sess_repo.get(db, session_id)
     _ensure_ownership(s, user.id)
 
-    # Deactivate
+    # Deactivate the session
     try:
         sess_repo.deactivate_session(db, session_id=session_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    
     return
 
 @router.get(
@@ -167,8 +198,15 @@ def get_summary(
     user_repo: UserRepository = Depends(get_user_repo),
     sess_repo: ChatSessionRepository = Depends(get_session_repo),
 ):
+    """
+    Get analytics summary for the current user's sessions.
+    """
+    # Identify the user
     session_id_hdr = _require_session_header(x_session_id)
     user = user_repo.get_or_create_user(db, session_id=session_id_hdr)
 
+    # Fetch aggregated statistics from the repository
     stats = sess_repo.get_session_summary(db, user_id=user.id)
+    
+    # Return summary data
     return SummaryResponse(**stats)

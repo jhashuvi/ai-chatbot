@@ -18,35 +18,29 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-# ---- Engine (robust defaults) ----
-# - future=True for SQLAlchemy 2.x style
-# - pool_pre_ping=True to heal dead/stale connections
-# - pool_recycle guards long-lived idle conns
-# - echo can be toggled via settings if you want SQL logs in dev
+# SQLAlchemy engine with connection pooling and health checks
 engine = create_engine(
     settings.DATABASE_URL,
-    future=True,
+    future=True,  # Use SQLAlchemy 2.x style
     poolclass=QueuePool,
-    pool_size=20,
-    max_overflow=30,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    echo=getattr(settings, "SQL_ECHO", False),
+    pool_size=20,  # Number of connections to maintain
+    max_overflow=30,  # Additional connections when pool is full
+    pool_pre_ping=True,  # Test connections before use
+    pool_recycle=3600,  # Recycle connections after 1 hour
+    echo=getattr(settings, "SQL_ECHO", False),  # Log SQL queries in dev
 )
 
-# ---- Session factory ----
-# expire_on_commit=False keeps attributes accessible after repo commits
+# Creates database sessions with consistent configuration
 SessionLocal = sessionmaker(
     bind=engine,
     autocommit=False,
     autoflush=False,
-    expire_on_commit=False,
+    expire_on_commit=False,  # Keep objects accessible after commit
     future=True,
 )
 
-# Import Base from your models package (don’t create a new Base here)
+# Import Base from models for table creation
 from .models import Base  # noqa: E402
-
 
 def get_db() -> Generator[Session, None, None]:
     """
@@ -64,7 +58,6 @@ def get_db() -> Generator[Session, None, None]:
         raise
     finally:
         db.close()
-
 
 @contextmanager
 def get_db_context() -> Generator[Session, None, None]:
@@ -84,7 +77,6 @@ def get_db_context() -> Generator[Session, None, None]:
         db.close()
 
 
-# -------- Optional helpers (handy for startup/debug) --------
 
 def redacted_dsn(dsn: str) -> str:
     """

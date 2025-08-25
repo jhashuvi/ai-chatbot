@@ -36,7 +36,6 @@ class TimestampSchema(BaseSchema):
     Schema with automatic timestamp fields.
     Used for responses that include creation/update times.
     """
-    
     created_at: datetime = Field(..., description="When the record was created")
     updated_at: datetime = Field(..., description="When the record was last updated")
 
@@ -45,7 +44,6 @@ class IDSchema(BaseSchema):
     Schema with an ID field.
     Used for responses that include database IDs.
     """
-    
     id: int = Field(..., description="Unique identifier for the record")
 
 class BaseResponseSchema(TimestampSchema, IDSchema):

@@ -1,4 +1,7 @@
 # app/services/chat_service.py
+"""
+Chat service for handling user messages and routing to appropriate response systems.
+"""
 from __future__ import annotations
 from typing import Optional, Dict, Any, List
 
@@ -12,7 +15,9 @@ from app.repositories.session import ChatSessionRepository
 
 class ChatService:
     """
-    Entry point for your /chat endpoint.
+    Entry point for  /chat endpoint.
+    
+    This service orchestrates the complete chat flow:
     - Classify intent (cheap)
     - Route to canned reply OR RAG
     - Persist messages consistently
@@ -31,20 +36,19 @@ class ChatService:
         self.msg_repo = msg_repo or MessageRepository()
         self.sess_repo = sess_repo or ChatSessionRepository()
 
-    # ---------------- NEW: auto-title helper ----------------
     def _autotitle_if_empty(self, db: Session, chat_session_id: int, user_text: str) -> None:
         """
-        Set a human title from the first user message if the session has no title yet.
-        Safe to call every turn: set_title_if_empty only writes when empty.
+        Set a human title from the first user message.
         """
         try:
             raw = (user_text or "").strip()
             if not raw:
                 candidate = "New chat"
             else:
-                # collapse whitespace
+                # Collapse whitespace for cleaner titles
                 candidate = " ".join(raw.split())
-                # trim to ~60 chars on a word boundary (but don't cut too short)
+                
+                # Trim to ~60 chars on a word boundary (but don't cut too short)
                 if len(candidate) > 60:
                     head = candidate[:60]
                     cut_at = head.rfind(" ")
@@ -52,41 +56,44 @@ class ChatService:
                         candidate = head[:cut_at]
                     else:
                         candidate = head
-                # light sentence casing
+                
+                # Light sentence casing for readability
                 candidate = candidate[0].upper() + candidate[1:] if candidate else "New chat"
 
             self.sess_repo.set_title_if_empty(db, chat_session_id, candidate)
         except Exception:
-            # Never let title generation break chat flow
             pass
-    # --------------------------------------------------------
 
-    # --- canned responses (keep short & friendly) ---
-
+    # --- Canned Response System ---
     @staticmethod
     def _reply_greeting() -> str:
+        """Friendly greeting with service overview."""
         return "Hey! I can help with account setup, payments & transfers, security, and regulations. What would you like to do?"
 
     @staticmethod
     def _reply_smalltalk() -> str:
-        return "Got it! If you have a question about your account, payments, or security, I’m here to help."
+        """Redirect smalltalk to business topics."""
+        return "Got it! If you have a question about your account, payments, or security, I'm here to help."
 
     @staticmethod
     def _reply_off_topic() -> str:
+        """Guide users back to supported topics."""
         return "I specialize in our fintech FAQs. Try asking about account setup, payments and transfers, security, or regulations."
 
     @staticmethod
     def _reply_nonsense() -> str:
-        return "I didn’t quite catch that. Could you ask a question about our financial services?"
+        """Handle unclear or nonsensical input."""
+        return "I didn't quite catch that. Could you ask a question about our financial services?"
 
     def _canned_reply_for_intent(self, intent: str, user_text: str) -> str:
+        """Route to appropriate canned response based on intent classification."""
         if intent == "greeting":
             return self._reply_greeting()
         if intent == "smalltalk":
             return self._reply_smalltalk()
         if intent == "off_topic":
             return self._reply_off_topic()
-        # default
+        # Default fallback for unexpected intents
         return self._reply_nonsense()
 
     def _send_canned(
@@ -99,24 +106,23 @@ class ChatService:
     ):
         """
         Persist the assistant message for non-RAG paths.
-        (User message is now persisted before calling this method.)
         """
+        # Create assistant message with intent metadata
         asst = self.msg_repo.create_assistant_message(
             db, chat_session_id, content,
-            sources=[],
+            sources=[],  # No RAG sources for canned responses
             retrieval_params=None,
             retrieval_stats={"router_intent": intent, "intent_confidence": confidence},
             context_policy=None,
-            answer_type="fallback",   # non-RAG path
+            answer_type="fallback",   # Mark as non-RAG path
             model_provider=None,
             model_used=None,
             tokens_in=None, tokens_out=None,
-            latency_ms=0.0,
+            latency_ms=0.0,  # Canned responses are instant
             retrieval_score=None,
         )
+        
         return {"answer": content, "message_id": asst.id, "answer_type": "fallback"}
-
-    # --- public API ---
 
     def handle_user_message(
         self,
@@ -127,34 +133,37 @@ class ChatService:
         history_size: int = 6,
     ):
         """
-        Main entry: classify → route
-        - For RAG path, let RAGService persist the user message (to avoid double-writes).
-        - For non-RAG paths, persist ONLY an assistant message here.
+        Main entry point for handling user messages.
+        For RAG path, RAGService handles user message persistence.
+        For non-RAG paths, we persist both user and assistant messages here.
         """
-        # ------- NEW: try to auto-title this session (first user turn wins) -------
         self._autotitle_if_empty(db, chat_session_id, user_text)
-        # ----------------------------------------------------------------------------
 
-        # small recent history for context bias
+        # Get small recent history for context bias in intent classification
+        # This helps understand user intent based on conversation flow
         history_msgs = self.msg_repo.get_conversation_history(db, chat_session_id, limit=history_size)
         history_for_intent = [{"role": m.role, "content": m.content} for m in history_msgs]
 
+        # Classify user intent using the intent service
         result: IntentResult = self.intent.classify(user_text, history_for_intent)
         print("intent_debug:", result.intent, result.confidence, result.signals.get("matched_keywords"))
 
-        # RAG-worthy: let RAG handle persistence & generation
+        # Route to RAG if this is a fintech question
         if result.intent == "fintech_question":
-                return self.rag.answer(
-                    db,
-                    chat_session_id,
-                    result.processed_query,
-                    category_hint=result.signals.get("category_hint"),
-                    intent_confidence=result.confidence,
-                )
+            # Let RAGService handle persistence & generation
+            return self.rag.answer(
+                db,
+                chat_session_id,
+                result.processed_query,
+                category_hint=result.signals.get("category_hint"),
+                intent_confidence=result.confidence,
+            )
 
-        # Non-RAG path: persist the user message too (so history is complete)
+        # Non-RAG path: persist the user message first (so history is complete)
+        # This ensures we have a complete conversation record
         self.msg_repo.create_user_message(db, chat_session_id, user_text)
 
+        # Generate and persist canned response
         content = self._canned_reply_for_intent(result.intent, user_text)
         return self._send_canned(
             db=db,

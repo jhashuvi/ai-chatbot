@@ -16,28 +16,32 @@ from .common import (
     RetrievalStats,
 )
 
-
 class MessageCreate(BaseSchema):
+    """
+    Schema for creating new messages.
+    """
     role: Literal["user", "assistant"] = Field(..., description="Message author")
     content: str = Field(..., description="Message text content")
     chat_session_id: int = Field(..., description="Parent chat session id")
 
-
 class MessageUpdate(BaseSchema):
+    """
+    Schema for updating message metadata after creation.
+    """
     # RAG artifacts / evidence
     sources: Optional[List[SourceRef]] = None
     retrieval_params: Optional[RetrievalParams] = None
     retrieval_stats: Optional[RetrievalStats] = None
     context_policy: Optional[PromptContextPolicy] = None
 
-    # State
+    # Response state and quality
     answer_type: Optional[Literal["grounded", "abstained", "fallback"]] = None
     error_type: Optional[str] = None
 
-    # Optional: if you also keep legacy citation objects
+    # Legacy citation support (for backward compatibility)
     citations: Optional[List[Citation]] = None
 
-    # Model usage
+    # Model usage and performance metrics
     model_provider: Optional[str] = None
     model_used: Optional[str] = None
     tokens_in: Optional[int] = Field(None, ge=0)
@@ -45,20 +49,27 @@ class MessageUpdate(BaseSchema):
     tokens_used: Optional[int] = Field(None, ge=0)  # total; repo may compute in+out
     latency_ms: Optional[float] = Field(None, ge=0.0)
 
-    # Retrieval quality mirror for quick filtering
+    # Retrieval quality metrics
     retrieval_score: Optional[float] = Field(None, ge=0.0, le=1.0)
 
-    # Feedback/moderation
-    user_feedback: Optional[int] = Field(None, ge=-1, le=1)
+    # User feedback and content moderation
+    user_feedback: Optional[int] = Field(None, ge=-1, le=1)  # -1=downvote, 0=clear, 1=upvote
     flagged: Optional[bool] = None
 
 
 class MessageResponse(BaseResponseSchema):
+    """
+    Complete message response including all metadata.
+    
+    This is what gets returned to the frontend, containing both the core
+    message content and the metadata for analytics and debugging.
+    """
+    # Core message fields
     role: Literal["user", "assistant"]
     content: str
     chat_session_id: int
 
-    # Optional RAG fields (assistant only)
+    # RAG-specific fields (typically only present on assistant messages)
     sources: Optional[List[SourceRef]] = None
     retrieval_params: Optional[RetrievalParams] = None
     retrieval_stats: Optional[RetrievalStats] = None
@@ -67,7 +78,7 @@ class MessageResponse(BaseResponseSchema):
     error_type: Optional[str] = None
     citations: Optional[List[Citation]] = None
 
-    # Model usage
+    # Model usage and performance data
     model_provider: Optional[str] = None
     model_used: Optional[str] = None
     tokens_in: Optional[int] = None
@@ -76,6 +87,6 @@ class MessageResponse(BaseResponseSchema):
     latency_ms: Optional[float] = None
     retrieval_score: Optional[float] = None
 
-    # Feedback/mod
+    # User feedback and moderation status
     user_feedback: Optional[int] = None
     flagged: bool
