@@ -8,9 +8,7 @@ A production-ready AI chatbot application that provides intelligent responses to
 - **RAG Pipeline**: Vector search, multi-stage ranking, and answer verification
 - **Session Management**: Persistent chat history with user authentication
 - **Real-time Chat**: Optimistic UI updates and responsive design
-- **Source Citations**: Transparent answer sources with confidence scoring
-- **User Feedback**: Thumbs up/down system for response quality
-- **Production Ready**: Comprehensive error handling, monitoring, and security
+- **Sources**: Transparent answer sources with confidence scoring
 
 ## 📋 Prerequisites
 
