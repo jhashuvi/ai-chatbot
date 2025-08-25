@@ -34,6 +34,12 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
   const answerType = message.answer_type;
   const hasRAGData = sources.length > 0 || !!answerType;
 
+  // Show only top 5 most relevant sources
+  const visibleSources = React.useMemo(
+    () => (sources ?? []).slice(0, 5),
+    [sources]
+  );
+
   const handleFeedback = async (value: 1 | -1 | 0) => {
     if (submittingFeedback || !message.id || isUser) return; // assistant only
     try {
@@ -202,7 +208,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                 </div>
               </div>
 
-              {sources.length > 0 && (
+              {visibleSources.length > 0 && (
                 <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
                   <button
                     onClick={() => setSourcesExpanded((v) => !v)}
@@ -211,8 +217,10 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                     <div className="flex items-center space-x-2">
                       <Shield className="w-4 h-4 text-blue-600" />
                       <span className="text-sm font-medium text-gray-900">
-                        {sources.length} source{sources.length !== 1 ? "s" : ""}{" "}
-                        found
+                        {visibleSources.length}
+                        {sources.length > 5 ? ` of ${sources.length}` : ""} most
+                        relevant source
+                        {visibleSources.length !== 1 ? "s" : ""}
                       </span>
                     </div>
                     {sourcesExpanded ? (
@@ -225,7 +233,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                   {sourcesExpanded && (
                     <div className="border-t border-gray-200 bg-white">
                       <div className="p-4 space-y-3">
-                        {sources.map((source, i) => (
+                        {visibleSources.map((source, i) => (
                           <div
                             key={source.id ?? i}
                             className="border border-gray-200 rounded-lg p-3 bg-gray-50"
@@ -242,11 +250,6 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                                 )}
                               </div>
                               <div className="ml-2 flex items-center space-x-2">
-                                {typeof source.rank === "number" && (
-                                  <span className="text-xs text-gray-500">
-                                    #{source.rank}
-                                  </span>
-                                )}
                                 <div
                                   className={`px-2 py-1 rounded-full text-xs font-medium border ${getConfidenceColor(
                                     source
