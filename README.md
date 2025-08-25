@@ -59,34 +59,40 @@ pip install -r requirements.txt
 
 #### Database Setup
 
+This project uses **PostgreSQL 15**. By default, the database runs on **localhost:5433** (so it won't clash with Postgres on 5432).
+
 **Option A: Using Docker (Recommended)**
 
 ```bash
-# Start PostgreSQL with Docker
-docker run --name ai-chatbot-db \
-  -e POSTGRES_DB=chatbot \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=password \
-  -p 5432:5432 \
+# Start PostgreSQL 15 mapped to host port 5433
+docker volume create pgdata
+docker run --name local-pg \
+  -e POSTGRES_DB=chatdb \
+  -e POSTGRES_USER=rag \
+  -e POSTGRES_PASSWORD=ragpw \
+  -p 5433:5432 \
+  -v pgdata:/var/lib/postgresql/data \
   -d postgres:15
-
-# Wait a few seconds for database to start
-sleep 5
 ```
 
 **Option B: Local PostgreSQL**
 
-1. Install PostgreSQL on your system
-2. Create a database named `chatbot`
-3. Update the `DATABASE_URL` in your environment variables
+1. Install PostgreSQL 15.
+2. Create role and database:
+
+   ```bash
+   createuser -s rag
+   createdb -O rag chatdb
+   psql -d chatdb -c "ALTER USER rag WITH PASSWORD 'ragpw';"
+   ```
 
 #### Environment Configuration
 
-Create a `.env` file in the `backend` directory:
+Create a `.env` file in the **root directory** (same level as backend/ and frontend/ folders):
 
 ```bash
-# Database
-DATABASE_URL=postgresql://postgres:password@localhost:5432/chatbot
+# Database (using port 5433)
+DATABASE_URL=postgresql+psycopg2://rag:ragpw@localhost:5433/chatdb
 
 # OpenAI
 OPENAI_API_KEY=sk-your-openai-api-key-here
@@ -98,13 +104,9 @@ PINECONE_INDEX=your-pinecone-index-name
 PINECONE_HOST=https://your-pinecone-host
 
 # JWT Authentication
-JWT_SECRET=your-super-secret-jwt-key-here
+JWT_SECRET=dev-super-secret-change-me
 JWT_ALG=HS256
 JWT_EXPIRE_MIN=60
-
-# Optional: Development settings
-SQL_ECHO=true
-LOG_LEVEL=INFO
 ```
 
 #### Run Database Migrations
@@ -113,6 +115,22 @@ LOG_LEVEL=INFO
 # Make sure you're in the backend directory with venv activated
 alembic upgrade head
 ```
+
+#### Check Database Connectivity
+
+```bash
+psql "postgresql://rag:ragpw@127.0.0.1:5433/chatdb" -c "SELECT now();"
+```
+
+**Notes**
+
+- Repo defaults to **port 5433**. If you change the Docker port mapping, also update `DATABASE_URL`.
+- Always run `alembic upgrade head` after pulling new migrations.
+- Quick health check (with backend running):
+
+  ```bash
+  curl -s http://localhost:8000/healthz | jq
+  ```
 
 #### Start the Backend Server
 
@@ -125,6 +143,22 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 The backend will be available at `http://localhost:8000`
+
+**Backend Development Tips**
+
+```bash
+# Run with debug logging
+LOG_LEVEL=DEBUG uvicorn app.main:app --reload
+
+# Run on different port
+uvicorn app.main:app --reload --port 8001
+
+# Check if backend is healthy
+curl http://localhost:8000/healthz
+
+# View API documentation
+open http://localhost:8000/docs
+```
 
 ### 3. Frontend Setup
 
@@ -160,48 +194,13 @@ npm start
 
 The frontend will be available at `http://localhost:3000`
 
-## 🧪 Testing the Application
-
-### 1. Health Check
-
-Visit the backend health endpoint:
-
-```
-http://localhost:8000/healthz
-```
-
-You should see a response indicating the service is healthy.
-
-### 2. API Documentation
-
-Access the interactive API documentation:
-
-```
-http://localhost:8000/docs
-```
-
-### 3. Chat Interface
-
-Open your browser and navigate to:
-
-```
-http://localhost:3000
-```
-
-You should see the chat interface with:
-
-- Welcome screen for new conversations
-- Sidebar for session management
-- Authentication modal (if not logged in)
-
 ### 4. Test Conversations
 
 Try these example queries to test the system:
 
 - **Simple greeting**: "Hello, how are you?"
-- **Fintech question**: "What are the transfer limits?"
+- **Fintech question**: "How do I open an account?"
 - **Specific query**: "How do I reset my password?"
-- **Vague query**: "What's the limit?" (should trigger abstention)
 
 ## 🔧 Development Workflow
 
@@ -229,9 +228,6 @@ cd frontend
 
 # Development mode with hot reload
 npm run dev
-
-# Linting
-npm run lint
 
 # Build for production
 npm run build
@@ -268,10 +264,13 @@ alembic history
 docker ps | grep postgres
 
 # If not running, start it
-docker start ai-chatbot-db
+docker start local-pg
 
 # Or check your local PostgreSQL service
 sudo systemctl status postgresql
+
+# Test database connection
+psql "postgresql://rag:ragpw@127.0.0.1:5433/chatdb" -c "SELECT now();"
 ```
 
 #### 2. Missing Dependencies
@@ -316,15 +315,6 @@ pip install -r requirements.txt
 - Check `PINECONE_INDEX` exists
 - Ensure `PINECONE_HOST` is correct for your region
 
-### Debug Mode
-
-Enable debug logging by setting in your `.env`:
-
-```bash
-LOG_LEVEL=DEBUG
-SQL_ECHO=true
-```
-
 ### Port Conflicts
 
 If ports are already in use:
@@ -341,60 +331,3 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 npm run dev -- -p 3001
 ```
 
-## 📁 Project Structure
-
-```
-ai-chatbot/
-├── backend/
-│   ├── app/
-│   │   ├── clients/          # External API clients (OpenAI, Pinecone)
-│   │   ├── models/           # Database models
-│   │   ├── repositories/     # Data access layer
-│   │   ├── routers/          # API endpoints
-│   │   ├── schemas/          # Pydantic schemas
-│   │   ├── services/         # Business logic (Intent, RAG, Chat)
-│   │   ├── config.py         # Configuration management
-│   │   ├── database.py       # Database connection
-│   │   └── main.py           # FastAPI application
-│   ├── alembic/              # Database migrations
-│   ├── requirements.txt      # Python dependencies
-│   └── .env                  # Environment variables
-├── frontend/
-│   ├── src/
-│   │   ├── app/              # Next.js app directory
-│   │   ├── components/       # React components
-│   │   ├── lib/              # Utilities and API client
-│   │   └── types/            # TypeScript type definitions
-│   ├── package.json          # Node.js dependencies
-│   └── .env.local            # Frontend environment variables
-└── README.md                 # This file
-```
-
-## 🔐 Security Notes
-
-- Never commit API keys or secrets to version control
-- Use strong JWT secrets in production
-- Regularly update dependencies for security patches
-- Enable HTTPS in production environments
-- Implement proper rate limiting for production use
-
-## 🚀 Production Deployment
-
-For production deployment, see the AWS deployment architecture in the project documentation or refer to the deployment guide.
-
-## 📞 Support
-
-If you encounter issues:
-
-1. Check the troubleshooting section above
-2. Review the logs for error messages
-3. Verify all environment variables are set correctly
-4. Ensure all services (PostgreSQL, backend, frontend) are running
-
-## 📄 License
-
-[Add your license information here]
-
----
-
-**Happy coding! 🎉**
